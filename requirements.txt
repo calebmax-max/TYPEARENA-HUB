@@ -3,3 +3,4 @@ numpy>=1.26
 opencv-python>=4.8
 PyMySQL>=1.1
 boto3>=1.34
+gunicorn>=21,<24

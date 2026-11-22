@@ -11,6 +11,7 @@ import OrderForm from './OrderForm.jsx'
 import PublicFooter from './PublicFooter.jsx'
 import ServicesPage from './ServicesPage.jsx'
 import ErrorPage from './ErrorPage.jsx'
+import { parsePricing } from './pricing.js'
 
 const Arrow = () => <span aria-hidden="true">↗</span>
 const WhatsAppIcon = () => <svg className="whatsapp-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.52 3.48A11.82 11.82 0 0 0 12.08 0C5.53 0 .2 5.33.2 11.88c0 2.09.55 4.13 1.6 5.93L.1 24l6.33-1.66a11.86 11.86 0 0 0 5.65 1.43h.01c6.55 0 11.88-5.33 11.88-11.88 0-3.18-1.24-6.16-3.45-8.41ZM12.09 21.72h-.01a9.83 9.83 0 0 1-5.01-1.37l-.36-.21-3.76.99 1-3.66-.23-.38a9.82 9.82 0 0 1-1.5-5.21C2.22 6.46 6.65 2.03 12.09 2.03c2.64 0 5.12 1.03 6.98 2.9a9.8 9.8 0 0 1 2.89 6.97c0 5.44-4.43 9.87-9.87 9.87Zm5.41-7.4c-.3-.15-1.78-.88-2.05-.98-.27-.1-.47-.15-.67.15-.2.3-.77.98-.94 1.18-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.47-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.14.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.49s1.07 2.89 1.22 3.09c.15.2 2.1 3.21 5.09 4.5.71.31 1.27.49 1.7.63.72.23 1.38.2 1.9.12.58-.09 1.78-.73 2.03-1.43.25-.7.25-1.3.17-1.43-.07-.13-.27-.2-.56-.35Z" /></svg>
@@ -85,6 +86,12 @@ function App() {
     targets.forEach((target) => observer.observe(target))
     return () => observer.disconnect()
   }, [])
+  useEffect(() => {
+    const prices = { 'Typing & formatting': 'From KSh 15/page', 'CVs and resumes': 'From KSh 200', Letters: 'From KSh 100', 'PDF editing': 'From KSh 30', 'Document conversion': 'From KSh 30/document', 'Online applications': 'From KSh 100/application', 'Registration forms': 'From KSh 30/form', 'Application assistance': 'From KSh 100', 'Form filling': 'From KSh 30/form', 'Online account assistance': 'From KSh 100', 'PowerPoint presentations': 'From KSh 300/presentation', 'Posters and flyers': 'From KSh 200/design', 'Graphic design': 'From KSh 200/design', 'Social media designs': 'From KSh 150/design', 'CV design': 'From KSh 200', 'Data entry': 'From KSh 150/task', 'Excel spreadsheets': 'From KSh 150/task', 'Research formatting': 'From KSh 150', Reports: 'From KSh 150', 'Basic data analysis': 'From KSh 300/task' }
+    document.querySelectorAll('.service-details li').forEach((item) => { const price = prices[item.textContent.trim()]; if (price) item.setAttribute('data-price', price) })
+  }, [])
+  useEffect(() => { const labels = { 'CVs and resumes': 'CV creation', Letters: 'Cover letter', 'Posters and flyers': 'Posters and flyers' }; document.querySelectorAll('.service-details li').forEach((item) => { const next = labels[item.textContent.trim()]; if (next) item.textContent = next }) }, [])
+  useEffect(() => { const prices = parsePricing(contactSettings.pricing); document.querySelectorAll('.service-details li').forEach((item) => { const raw = prices[item.textContent.trim()]; if (raw) item.setAttribute('data-price', raw.startsWith('From ') ? raw : `From ${raw}`) }) }, [contactSettings.pricing])
   if (offline) return <ErrorPage offline />
   if (window.location.pathname === '/services') return <ServicesPage onOrder={() => { window.location.href = '/#order' }} />
   if (window.location.pathname !== '/') return <ErrorPage />

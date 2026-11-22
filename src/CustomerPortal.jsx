@@ -84,6 +84,7 @@ export default function CustomerPortal({ onClose }) {
     } catch (cause) { setMessage(cause.message) } finally { setBusy(false) }
   }
 
+  useEffect(() => { if (!tracking) return undefined; const poll = async () => { if (document.hidden) return; try { const normalizedPhone = normalizePhone(phone); const response = await fetch(`/api/orders/${tracking.reference}/tracking?phone=${encodeURIComponent(normalizedPhone)}`); if (!response.ok) return; const data = await response.json(); setTracking(data); if (['Completed', 'Delivered'].includes(data.status)) { const filesResponse = await fetch(`/api/orders/${tracking.reference}/deliverables?phone=${encodeURIComponent(normalizedPhone)}`); if (filesResponse.ok) setDeliverables(await filesResponse.json()) } } catch { /* keep the current status if a background refresh fails */ } }; const interval = window.setInterval(poll, 10000); return () => window.clearInterval(interval) }, [tracking?.reference, phone])
   const reset = () => { setQuote(null); setTracking(null); setDeliverables([]); setMessage('') }
   const paymentDetails = quote && quote.decision === 'accepted' && !quote.paymentStatus
 

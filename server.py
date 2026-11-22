@@ -7,6 +7,9 @@ import shutil
 import sqlite3
 import uuid
 import secrets
+import base64
+import hashlib
+import hmac
 import time
 import socket
 import struct
@@ -69,7 +72,7 @@ MYSQL_CONFIG = {
 MYSQL_CONFIGURED = pymysql and all(MYSQL_CONFIG[key] for key in ("host", "user", "password", "database"))
 DB_BACKEND = "mysql" if MYSQL_CONFIGURED else "sqlite"
 ADMIN_PASSWORD = os.environ.get("TONIE_ADMIN_PASSWORD", "change-me")
-ADMIN_TOKENS = {}
+ADMIN_TOKEN_SECRET = os.environ.get("TONIE_ADMIN_TOKEN_SECRET", "")
 ADMIN_TOKEN_TTL = int(os.environ.get("TONIE_ADMIN_TOKEN_TTL", "28800"))
 LOGIN_ATTEMPTS = {}
 LOGIN_WINDOW_SECONDS = 300
@@ -91,6 +94,8 @@ REQUIRE_MALWARE_SCAN = os.environ.get("TONIE_REQUIRE_MALWARE_SCAN", "1" if os.en
 if os.environ.get("TONIE_ENV") == "production":
     if ADMIN_PASSWORD == "change-me" and not os.environ.get("TONIE_ADMIN_PASSWORD_HASH"):
         raise RuntimeError("Configure TONIE_ADMIN_PASSWORD_HASH before starting in production.")
+    if not ADMIN_TOKEN_SECRET:
+        raise RuntimeError("Configure TONIE_ADMIN_TOKEN_SECRET before starting in production.")
     if os.environ.get("TONIE_REQUIRE_OBJECT_STORAGE", "1") == "1" and not OBJECT_STORAGE_ENABLED:
         raise RuntimeError("Configure object storage before starting in production.")
     if REQUIRE_MALWARE_SCAN and not CLAMAV_HOST:
@@ -108,6 +113,28 @@ PUBLIC_SETTINGS_CACHE_TTL = 300
 
 def storage_key(kind, reference, stored_name):
     return f"{kind}/{reference}/{stored_name}"
+
+def audit_event(action, **details):
+    safe_details = " ".join(f"{key}={str(value).replace(chr(10), ' ')[:160]}" for key, value in details.items())
+    app.logger.info("security_audit action=%s %s", action, safe_details)
+
+def validate_file_signature(raw, extension):
+    signatures = {
+        "pdf": raw.startswith(b"%PDF-"),
+        "jpg": raw.startswith(b"\xff\xd8\xff"),
+        "jpeg": raw.startswith(b"\xff\xd8\xff"),
+        "png": raw.startswith(b"\x89PNG\r\n\x1a\n"),
+        "webp": raw.startswith(b"RIFF") and raw[8:12] == b"WEBP",
+        "doc": raw.startswith(b"\xd0\xcf\x11\xe0"),
+        "xls": raw.startswith(b"\xd0\xcf\x11\xe0"),
+        "ppt": raw.startswith(b"\xd0\xcf\x11\xe0"),
+        "docx": raw.startswith(b"PK"),
+        "xlsx": raw.startswith(b"PK"),
+        "pptx": raw.startswith(b"PK"),
+        "zip": raw.startswith(b"PK"),
+    }
+    if extension in signatures and not signatures[extension]:
+        raise ValueError("The file content does not match its extension.")
 
 def store_bytes(raw, key, content_type, local_path):
     if OBJECT_STORAGE_ENABLED:
@@ -299,12 +326,17 @@ def init_order_db():
                 `key` VARCHAR(64) PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''
             );
-            CREATE TABLE IF NOT EXISTS mpesa_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_text TEXT NOT NULL,
-                received_at TEXT NOT NULL
-            );
         """)
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_orders_reference_phone ON orders(reference, phone)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_payments_order_status ON payments(order_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_quotations_order_created ON quotations(order_id, created_at)",
+        ):
+            try:
+                connection.execute(index_sql)
+            except Exception:
+                pass
         defaults = {
             "business_name": "TYPEARENA HUB",
             "tagline": "Your Cyber. Online.",
@@ -314,6 +346,7 @@ def init_order_db():
             "paybill": "",
             "till_number": "",
             "payment_instructions": "",
+            "pricing": "Typing | KSh 15/page\nDocument formatting | KSh 15/page\nCV creation | KSh 250\nCover letter | KSh 100\nPDF editing | KSh 30\nDocument conversion | KSh 30/document\nOnline applications | KSh 100/application\nRegistration forms | KSh 30/form\nApplication assistance | KSh 100\nForm filling | KSh 30/form\nOnline account assistance | KSh 100\nPowerPoint presentations | KSh 300/presentation\nPosters | KSh 200/design\nFlyers | KSh 200/design\nGraphic design | KSh 200/design\nSocial media designs | KSh 150/design\nCV design/redesign | KSh 200\nData entry | KSh 150/task\nExcel spreadsheets | KSh 150/task\nResearch formatting | KSh 150\nReport formatting | KSh 150\nBasic data analysis | KSh 300/task",
             "operating_hours": "Online every day",
             "testimonials": "",
         }
@@ -332,6 +365,12 @@ init_order_db()
 def start_request_metrics():
     g.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
     g.request_started_at = time.perf_counter()
+    if request.method in {"POST", "PATCH", "DELETE"}:
+        origin = request.headers.get("Origin", "").rstrip("/")
+        allowed_origin = os.environ.get("TONIE_ALLOWED_ORIGIN", "").rstrip("/")
+        local_origins = {"http://127.0.0.1:5173", "http://localhost:5173"}
+        if origin and ((allowed_origin and allowed_origin != "*" and origin != allowed_origin) or (not allowed_origin and os.environ.get("TONIE_ENV") == "production") or (not allowed_origin and os.environ.get("TONIE_ENV") != "production" and origin not in local_origins)):
+            return jsonify({"error": "Request origin is not allowed."}), 403
 
 @app.after_request
 def add_dev_headers(response):
@@ -343,6 +382,13 @@ def add_dev_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.path.startswith("/api/admin/") or request.path == "/api/admin/login":
+        response.headers["Cache-Control"] = "no-store"
     response.headers["X-Request-ID"] = getattr(g, "request_id", "")
     elapsed_ms = (time.perf_counter() - getattr(g, "request_started_at", time.perf_counter())) * 1000
     response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
@@ -368,11 +414,25 @@ def admin_token():
     header = request.headers.get("Authorization", "")
     return header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
 
+def issue_admin_token():
+    secret = (ADMIN_TOKEN_SECRET or ADMIN_PASSWORD).encode()
+    payload = f"{int(time.time())}.{secrets.token_urlsafe(18)}"
+    signature = hmac.new(secret, payload.encode(), hashlib.sha256).digest()
+    return f"{payload}.{base64.urlsafe_b64encode(signature).decode().rstrip('=')}"
+
+def valid_admin_token(token):
+    try:
+        issued_text, nonce, signature = token.split(".", 2)
+        payload = f"{issued_text}.{nonce}"
+        expected = hmac.new((ADMIN_TOKEN_SECRET or ADMIN_PASSWORD).encode(), payload.encode(), hashlib.sha256).digest()
+        supplied = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
+        return hmac.compare_digest(supplied, expected) and time.time() - int(issued_text) <= ADMIN_TOKEN_TTL
+    except (ValueError, TypeError, OverflowError):
+        return False
+
 def require_admin():
     token = admin_token()
-    expires_at = ADMIN_TOKENS.get(token)
-    if not expires_at or expires_at <= time.time():
-        ADMIN_TOKENS.pop(token, None)
+    if not valid_admin_token(token):
         return jsonify({"error": "Administrator authentication required."}), 401
     return None
 
@@ -384,7 +444,7 @@ def normalize_kenyan_phone(value):
         return "254" + digits[1:]
     raise ValueError("Enter a valid Kenyan phone number, for example 0712 345 678 or +254 712 345 678.")
 
-PUBLIC_SETTING_KEYS = {"business_name", "tagline", "whatsapp", "email", "phone", "operating_hours", "testimonials"}
+PUBLIC_SETTING_KEYS = {"business_name", "tagline", "whatsapp", "email", "phone", "operating_hours", "testimonials", "pricing"}
 EDITABLE_SETTING_KEYS = PUBLIC_SETTING_KEYS | {"paybill", "till_number", "payment_instructions"}
 
 @app.route("/api/settings", methods=["GET"])
@@ -419,6 +479,7 @@ def admin_settings():
             global PUBLIC_SETTINGS_CACHE, PUBLIC_SETTINGS_CACHE_AT
             PUBLIC_SETTINGS_CACHE = None
             PUBLIC_SETTINGS_CACHE_AT = 0
+            audit_event("admin_settings_updated", keys=",".join(key for key, _ in updates), client=request.remote_addr or "unknown")
         rows = connection.execute("SELECT `key`, value FROM business_settings ORDER BY `key`").fetchall()
     return jsonify({row["key"]: row["value"] for row in rows})
 
@@ -428,19 +489,23 @@ def admin_login():
         return make_response("", 204)
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password", "") or request.form.get("password", ""))
+    if not password or len(password) > 256:
+        return jsonify({"error": "Enter a valid administrator password."}), 400
     client_key = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
     now = time.time()
     attempts = [stamp for stamp in LOGIN_ATTEMPTS.get(client_key, []) if now - stamp < LOGIN_WINDOW_SECONDS]
     if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        audit_event("admin_login_blocked", client=client_key)
         return jsonify({"error": "Too many sign-in attempts. Please try again later."}), 429
     configured_hash = os.environ.get("TONIE_ADMIN_PASSWORD_HASH", "")
     valid = check_password_hash(configured_hash, password) if configured_hash else secrets.compare_digest(password, ADMIN_PASSWORD)
     if not valid:
         LOGIN_ATTEMPTS[client_key] = attempts + [now]
+        audit_event("admin_login_failed", client=client_key)
         return jsonify({"error": "Incorrect administrator password."}), 401
     LOGIN_ATTEMPTS.pop(client_key, None)
-    token = secrets.token_urlsafe(32)
-    ADMIN_TOKENS[token] = now + ADMIN_TOKEN_TTL
+    token = issue_admin_token()
+    audit_event("admin_login_success", client=client_key)
     return jsonify({"token": token, "expiresIn": ADMIN_TOKEN_TTL, "message": "Signed in successfully."})
 
 @app.route("/api/admin/orders", methods=["OPTIONS", "GET"])
@@ -631,6 +696,10 @@ def upload_admin_deliverables(reference):
         raw = uploaded.read(ORDER_FILE_BYTES + 1)
         if len(raw) > ORDER_FILE_BYTES:
             return jsonify({"error": f"{original_name} must be 20MB or smaller."}), 413
+        try:
+            validate_file_signature(raw, extension)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 415
         total_bytes += len(raw)
         if total_bytes > MAX_ORDER_TOTAL_BYTES:
             return jsonify({"error": "The combined upload must be 100MB or smaller."}), 413
@@ -695,36 +764,10 @@ def submit_customer_payment(reference):
         if existing:
             return jsonify({"error": "A payment is already awaiting verification."}), 409
         submitted_at = datetime.now(timezone.utc).isoformat()
-        matches = connection.execute("SELECT id, message_text FROM mpesa_messages ORDER BY id ASC").fetchall()
-        matched_message = next((message for message in matches if payment_reference.upper() in message["message_text"].upper()), None)
-        payment_status = "Confirmed" if matched_message else "Pending Verification"
-        order_status = "Payment Confirmed" if matched_message else "Awaiting Payment"
-        connection.execute("INSERT INTO payments (order_id, amount, reference, status, submitted_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?)", (order["id"], quote["final_amount"], payment_reference, payment_status, submitted_at, submitted_at if matched_message else None))
-        connection.execute("UPDATE orders SET status = ? WHERE id = ?", (order_status, order["id"]))
-        if matched_message:
-            connection.execute("DELETE FROM mpesa_messages WHERE id = ?", (matched_message["id"],))
-    return jsonify({"reference": reference, "amount": quote["final_amount"], "paymentReference": payment_reference, "status": payment_status, "autoMatched": bool(matched_message)}), 201
-
-@app.route("/api/admin/mpesa-messages", methods=["OPTIONS", "POST", "GET"])
-def admin_mpesa_messages():
-    if request.method == "OPTIONS":
-        return make_response("", 204)
-    denied = require_admin()
-    if denied:
-        return denied
-    if request.method == "POST":
-        payload = request.get_json(silent=True) or {}
-        message_text = str(payload.get("message", "")).strip()
-        if not message_text:
-            return jsonify({"error": "Paste an M-Pesa message first."}), 400
-        with db_connection() as connection:
-            cursor = connection.execute("INSERT INTO mpesa_messages (message_text, received_at) VALUES (?, ?)", (message_text, datetime.now(timezone.utc).isoformat()))
-        return jsonify({"id": cursor.lastrowid, "status": "Stored", "pendingMessages": pending_mpesa_count()}), 201
-    return jsonify({"pendingMessages": pending_mpesa_count()})
-
-def pending_mpesa_count():
-    with db_connection() as connection:
-        return connection.execute("SELECT COUNT(*) AS count FROM mpesa_messages").fetchone()["count"]
+        payment_status = "Pending Verification"
+        connection.execute("INSERT INTO payments (order_id, amount, reference, status, submitted_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?)", (order["id"], quote["final_amount"], payment_reference, payment_status, submitted_at, None))
+        connection.execute("UPDATE orders SET status = 'Awaiting Payment' WHERE id = ?", (order["id"],))
+    return jsonify({"reference": reference, "amount": quote["final_amount"], "paymentReference": payment_reference, "status": payment_status, "autoMatched": False}), 201
 
 @app.route("/api/admin/orders/<reference>/payment", methods=["OPTIONS", "PATCH"])
 def update_admin_payment(reference):
@@ -771,7 +814,18 @@ def update_admin_order(reference):
     if status not in allowed_statuses:
         return jsonify({"error": "That order status is not available."}), 400
     with db_connection() as connection:
-        cursor = connection.execute("UPDATE orders SET status = ? WHERE reference = ?", (status, reference))
+        order = connection.execute("SELECT id FROM orders WHERE reference = ?", (reference,)).fetchone()
+        if not order:
+            return jsonify({"error": "Order not found."}), 404
+        cursor = connection.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order["id"]))
+        if status == "Payment Confirmed":
+            payment = connection.execute("SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
+            if payment:
+                connection.execute("UPDATE payments SET status = 'Confirmed', confirmed_at = ?, notes = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), "Confirmed by administrator", payment["id"]))
+        elif status == "Awaiting Payment":
+            payment = connection.execute("SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
+            if payment:
+                connection.execute("UPDATE payments SET status = 'Pending Verification', confirmed_at = NULL, notes = ? WHERE id = ?", ("Awaiting administrator confirmation", payment["id"]))
     if cursor.rowcount == 0:
         return jsonify({"error": "Order not found."}), 404
     return jsonify({"reference": reference, "status": status})
@@ -827,6 +881,10 @@ def create_order():
         raw = uploaded.read(ORDER_FILE_BYTES + 1)
         if len(raw) > ORDER_FILE_BYTES:
             return jsonify({"error": f"{uploaded.filename} must be 20MB or smaller."}), 413
+        try:
+            validate_file_signature(raw, extension)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 415
         total_bytes += len(raw)
         if total_bytes > MAX_ORDER_TOTAL_BYTES:
             return jsonify({"error": "The combined upload must be 100MB or smaller."}), 413
