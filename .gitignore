@@ -1,0 +1,7 @@
+.env
+data/*.db
+data/order-files/
+data/delivery-files/
+__pycache__/
+node_modules/
+dist/
