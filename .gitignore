@@ -5,6 +5,7 @@ backend/data/*.db
 backend/data/order-files/
 backend/data/delivery-files/
 backend/__pycache__/
+backend/.venv/
 node_modules/
 frontend/node_modules/
 frontend/dist/
