@@ -16,13 +16,31 @@ import struct
 import logging
 import queue
 import threading
+import zipfile
+import re
+import subprocess
+import tempfile
+import shutil as file_shutil
+from html import unescape
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import cv2, numpy as np, io
 try:
     import fitz
 except ImportError:
     fitz = None
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = ImageDraw = ImageFont = None
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+try:
+    from pptx import Presentation
+except ImportError:
+    Presentation = None
 
 try:
     import pymysql
@@ -148,6 +166,18 @@ def store_bytes(raw, key, content_type, local_path):
     with open(local_path, "wb") as target:
         target.write(raw)
 
+def read_stored_bytes(kind, reference, stored_name):
+    if OBJECT_STORAGE_ENABLED:
+        response = OBJECT_STORAGE_CLIENT.get_object(Bucket=OBJECT_STORAGE_BUCKET, Key=storage_key(kind, reference, stored_name))
+        return response["Body"].read()
+    local_kind = "order-files" if kind == "orders" else "delivery-files"
+    path = os.path.abspath(os.path.join(DATA_DIR, local_kind, reference, stored_name))
+    root = os.path.abspath(os.path.join(DATA_DIR, local_kind, reference))
+    if not path.startswith(root + os.sep) or not os.path.exists(path):
+        return None
+    with open(path, "rb") as source:
+        return source.read()
+
 def remove_storage_prefix(reference):
     if OBJECT_STORAGE_ENABLED:
         for kind in ("orders", "deliverables", "previews"):
@@ -184,15 +214,122 @@ def preview_response(reference, stored_name, content_type):
     response.headers["Content-Disposition"] = "inline"
     return response
 
+def office_to_pdf(raw, extension):
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        for candidate in (r"C:\Program Files\LibreOffice\program\soffice.exe", r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"):
+            if os.path.exists(candidate):
+                soffice = candidate
+                break
+    if not soffice:
+        return None
+    with tempfile.TemporaryDirectory(prefix="typearena-preview-") as folder:
+        source = os.path.join(folder, f"source.{extension}")
+        with open(source, "wb") as target:
+            target.write(raw)
+        try:
+            subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", folder, source], check=True, capture_output=True, timeout=45)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        output = os.path.join(folder, "source.pdf")
+        if not os.path.exists(output):
+            return None
+        with open(output, "rb") as generated:
+            return generated.read()
+
+def text_preview_image(lines):
+    if Image is None:
+        return None
+    canvas = Image.new("RGB", (1200, 1600), "white")
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default()
+    y = 70
+    for line in lines[:60]:
+        line = str(line).strip()
+        if not line:
+            y += 12
+            continue
+        for wrapped in [line[index:index + 90] for index in range(0, len(line), 90)]:
+            draw.text((70, y), wrapped, fill=(45, 40, 36), font=font)
+            y += 24
+            if y > 1480:
+                break
+        if y > 1480:
+            break
+    return cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR)
+
+def combine_preview_pages(images, limit=5):
+    """Create a small contact sheet so previews cover several pages cheaply."""
+    pages = [page for page in images[:limit] if page is not None]
+    if not pages:
+        return None
+    if len(pages) == 1:
+        return pages[0]
+    thumb_width = 620
+    gutter = 24
+    columns = 2
+    thumbnails = []
+    for page in pages:
+        height, width = page.shape[:2]
+        scale = min(1, thumb_width / max(width, 1))
+        thumb = cv2.resize(page, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA) if scale < 1 else page
+        thumbnails.append(thumb)
+    cell_height = max(page.shape[0] for page in thumbnails)
+    rows = (len(thumbnails) + columns - 1) // columns
+    sheet = np.full((rows * cell_height + (rows + 1) * gutter, columns * thumb_width + (columns + 1) * gutter, 3), 250, dtype=np.uint8)
+    for index, page in enumerate(thumbnails):
+        row, column = divmod(index, columns)
+        y = gutter + row * (cell_height + gutter)
+        x = gutter + column * (thumb_width + gutter)
+        sheet[y:y + page.shape[0], x:x + page.shape[1]] = page
+    return sheet
+
 def create_watermarked_preview(raw, extension):
     image = None
-    if extension == "pdf" and fitz:
-        document = fitz.open(stream=raw, filetype="pdf")
+    office_extensions = {"doc", "docx", "xls", "xlsx", "ppt", "pptx"}
+    pdf_raw = raw if extension == "pdf" else office_to_pdf(raw, extension) if extension in office_extensions else None
+    if pdf_raw and fitz:
+        document = fitz.open(stream=pdf_raw, filetype="pdf")
         if document.page_count:
-            page = document.load_page(0)
-            pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-            image = cv2.imdecode(np.frombuffer(pixmap.tobytes("jpg", jpg_quality=82), np.uint8), cv2.IMREAD_COLOR)
+            pages = []
+            for page_index in range(min(5, document.page_count)):
+                page = document.load_page(page_index)
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), alpha=False)
+                pages.append(cv2.imdecode(np.frombuffer(pixmap.tobytes("jpg", jpg_quality=78), np.uint8), cv2.IMREAD_COLOR))
+            image = combine_preview_pages(pages)
         document.close()
+    elif extension == "docx" and Image is not None:
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
+            paragraphs = re.findall(r"<w:p[ >].*?</w:p>", xml, flags=re.DOTALL)
+            lines = []
+            for paragraph in paragraphs:
+                text = "".join(unescape(value) for value in re.findall(r"<w:t[^>]*>(.*?)</w:t>", paragraph, flags=re.DOTALL))
+                if text.strip():
+                    lines.append(text.strip())
+            image = text_preview_image(lines)
+        except (KeyError, zipfile.BadZipFile):
+            image = None
+    elif extension in {"xlsx"} and openpyxl is not None:
+        try:
+            workbook = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            lines = [f"Sheet: {sheet.title}" for sheet in workbook.worksheets for row in sheet.iter_rows(max_row=45, values_only=True) for values in [" | ".join(str(value) for value in row if value is not None)] if values]
+            image = text_preview_image(lines)
+        except Exception:
+            image = None
+    elif extension in {"pptx"} and Presentation is not None:
+        try:
+            presentation = Presentation(io.BytesIO(raw))
+            slide_images = []
+            for index, slide in enumerate(presentation.slides, 1):
+                lines = [f"Slide {index}"] + [shape.text.strip() for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.text.strip()]
+                slide_images.append(text_preview_image(lines))
+                if len(slide_images) >= 5:
+                    break
+            image = combine_preview_pages(slide_images)
+        except Exception:
+            image = None
     elif extension in {"jpg", "jpeg", "png", "webp"}:
         image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
@@ -201,11 +338,26 @@ def create_watermarked_preview(raw, extension):
     scale = min(1, 1280 / max(width, 1))
     if scale < 1:
         image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+    height, width = image.shape[:2]
     label = "TYPEARENA HUB - PREVIEW"
-    position = (28, max(48, image.shape[0] // 2))
-    size = max(.7, image.shape[1] / 1800)
-    cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (255, 255, 255), 3, cv2.LINE_AA)
-    cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (80, 55, 35), 1, cv2.LINE_AA)
+    if Image is not None:
+        base = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)).convert("RGBA")
+        tile = Image.new("RGBA", (width * 2, height * 2), (0, 0, 0, 0))
+        watermark = ImageDraw.Draw(tile)
+        font = ImageFont.load_default()
+        for y in range(-height, height * 2, 210):
+            for x in range(-width, width * 2, 330):
+                watermark.text((x, y), label, fill=(70, 48, 32, 82), font=font, stroke_width=1, stroke_fill=(255, 255, 255, 45))
+        tile = tile.rotate(45, expand=False, resample=Image.Resampling.BICUBIC)
+        left = (tile.width - base.width) // 2
+        top = (tile.height - base.height) // 2
+        base.alpha_composite(tile.crop((left, top, left + base.width, top + base.height)))
+        image = cv2.cvtColor(np.array(base.convert("RGB")), cv2.COLOR_RGB2BGR)
+    else:
+        position = (28, max(48, image.shape[0] // 2))
+        size = max(.7, image.shape[1] / 1800)
+        cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (255, 255, 255), 3, cv2.LINE_AA)
+        cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (80, 55, 35), 1, cv2.LINE_AA)
     ok, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 72])
     return buffer.tobytes() if ok else None
 
@@ -402,13 +554,21 @@ def init_order_db():
             "testimonials": "",
         }
         connection.executemany("INSERT OR IGNORE INTO business_settings (`key`, value) VALUES (?, ?)", defaults.items())
-    try:
-        with db_connection() as connection:
-            connection.execute("ALTER TABLE orders ADD COLUMN delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal'")
-    except Exception:
-        pass
+    # Older local databases may have been created before these columns were
+    # introduced. Keep the migration in the same connection as the follow-up
+    # updates so a failed ALTER cannot make startup fail on the update query.
     with db_connection() as connection:
+        if DB_BACKEND == "sqlite":
+            order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
+            if "delivery_method" not in order_columns:
+                connection.execute("ALTER TABLE orders ADD COLUMN delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal'")
+        else:
+            try:
+                connection.execute("ALTER TABLE orders ADD COLUMN delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal'")
+            except Exception:
+                pass
         connection.execute("UPDATE orders SET delivery_method = 'Portal' WHERE delivery_method = 'Download'")
+        connection.execute("UPDATE quotations SET payment_terms = 'Full payment after preview approval.' WHERE payment_terms = 'Full payment before work begins.'")
 
 init_order_db()
 
@@ -618,26 +778,26 @@ def create_quotation(reference):
     if denied:
         return denied
     payload = request.get_json(silent=True) or {}
-    required = ["payment_terms", "completion_time", "expiry_date", "description"]
+    required = ["completion_time", "description"]
     if any(not str(payload.get(key, "")).strip() for key in required):
-        return jsonify({"error": "Payment terms, completion time, expiry date and work description are required."}), 400
+        return jsonify({"error": "Completion time and work included are required."}), 400
     try:
-        base_price = money_value(payload, "base_price")
-        discount = money_value(payload, "discount")
-        additional_fees = money_value(payload, "additional_fees")
-        express_fee = money_value(payload, "express_fee")
+        final_price = money_value(payload, "final_price")
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
-    final_amount = max(Decimal("0.00"), base_price + additional_fees + express_fee - discount)
+    if final_price <= Decimal("0.00"):
+        return jsonify({"error": "Final price must be greater than zero."}), 400
     with db_connection() as connection:
         order = connection.execute("SELECT id FROM orders WHERE reference = ?", (reference,)).fetchone()
         if not order:
             return jsonify({"error": "Order not found."}), 404
         created_at = datetime.now(timezone.utc).isoformat()
+        payment_terms = str(payload.get("payment_terms", "")).strip() or "Full payment after preview approval."
+        expiry_date = str(payload.get("expiry_date", "")).strip() or (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat()
         connection.execute("""
             INSERT INTO quotations (order_id, base_price, discount, additional_fees, express_fee, final_amount, payment_terms, completion_time, expiry_date, description, revision_policy, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (order["id"], float(base_price), float(discount), float(additional_fees), float(express_fee), float(final_amount), str(payload["payment_terms"]).strip(), str(payload["completion_time"]).strip(), str(payload["expiry_date"]).strip(), str(payload["description"]).strip(), str(payload.get("revision_policy", "")).strip(), created_at))
+        """, (order["id"], float(final_price), 0, 0, 0, float(final_price), payment_terms, str(payload["completion_time"]).strip(), expiry_date, str(payload["description"]).strip(), str(payload.get("revision_policy", "1 revision included")).strip(), created_at))
         connection.execute("UPDATE orders SET status = 'Quotation Sent' WHERE id = ?", (order["id"],))
         quote = connection.execute("SELECT * FROM quotations WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
     return jsonify(dict(quote)), 201
@@ -680,10 +840,11 @@ def track_customer_order(reference):
         ("Request reviewed", "Under Review"),
         ("Quotation issued", "Quotation Sent"),
         ("Quotation accepted", "Quotation Accepted"),
-        ("Preview ready", "Preview Ready"),
-        ("Payment confirmed", "Payment Confirmed"),
         ("Work in progress", "In Progress"),
         ("Work completed", "Completed"),
+        ("Preview ready", "Preview Ready"),
+        ("Payment submitted", "Awaiting Payment"),
+        ("Payment confirmed", "Payment Confirmed"),
         ("Files delivered", "Delivered"),
     ]
     status_index = {status: index for index, (_, status) in enumerate(milestones)}
@@ -724,11 +885,34 @@ def list_customer_previews(reference):
         confirmed = connection.execute("SELECT id FROM payments WHERE order_id = ? AND status = 'Confirmed' ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
         files = connection.execute("""
             SELECT d.original_name, d.stored_name, d.content_type, d.size_bytes, d.created_at,
-                   p.stored_name AS preview_stored_name, p.content_type AS preview_content_type
+                   d.id AS delivery_file_id, p.stored_name AS preview_stored_name, p.content_type AS preview_content_type
             FROM delivery_files d LEFT JOIN preview_files p ON p.delivery_file_id = d.id
             WHERE d.order_id = ? ORDER BY d.id DESC
         """, (order["id"],)).fetchall()
-    return jsonify([{**dict(file), "previewAvailable": bool(file["preview_stored_name"]), "downloadAvailable": bool(confirmed)} for file in files])
+        result = []
+        for file in files:
+            item = dict(file)
+            if not item["preview_stored_name"] or "_v3_" not in item["preview_stored_name"]:
+                extension = item["original_name"].rsplit(".", 1)[-1].lower() if "." in item["original_name"] else ""
+                raw = read_stored_bytes("deliverables", reference, item["stored_name"])
+                preview_raw = create_watermarked_preview(raw, extension) if raw else None
+                if preview_raw:
+                    old_preview_name = item["preview_stored_name"]
+                    preview_name = f"{uuid.uuid4().hex}_v3_{os.path.splitext(item['original_name'])[0]}.jpg"
+                    if old_preview_name:
+                        connection.execute("DELETE FROM preview_files WHERE delivery_file_id = ?", (item["delivery_file_id"],))
+                        if not OBJECT_STORAGE_ENABLED:
+                            old_path = os.path.join(DELIVERY_UPLOAD_DIR, reference, "previews", old_preview_name)
+                            if os.path.exists(old_path):
+                                os.remove(old_path)
+                    store_bytes(preview_raw, storage_key("previews", reference, preview_name), "image/jpeg", os.path.join(DELIVERY_UPLOAD_DIR, reference, "previews", preview_name))
+                    connection.execute("INSERT INTO preview_files (delivery_file_id, stored_name, content_type, size_bytes, created_at) SELECT id, ?, ?, ?, ? FROM delivery_files WHERE order_id = ? AND stored_name = ?", (preview_name, "image/jpeg", len(preview_raw), datetime.now(timezone.utc).isoformat(), order["id"], item["stored_name"]))
+                    item["preview_stored_name"] = preview_name
+                    item["preview_content_type"] = "image/jpeg"
+            item["previewAvailable"] = bool(item["preview_stored_name"])
+            item["downloadAvailable"] = bool(confirmed)
+            result.append(item)
+    return jsonify(result)
 
 @app.route("/api/orders/<reference>/previews/<stored_name>", methods=["GET"])
 def view_customer_preview(reference, stored_name):
@@ -812,11 +996,11 @@ def upload_admin_deliverables(reference):
             preview_raw = create_watermarked_preview(raw, original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "")
             preview_name = None
             if preview_raw:
-                preview_name = f"{uuid.uuid4().hex}_{os.path.splitext(original_name)[0]}.jpg"
+                preview_name = f"{uuid.uuid4().hex}_v3_{os.path.splitext(original_name)[0]}.jpg"
                 store_bytes(preview_raw, storage_key("previews", reference, preview_name), "image/jpeg", os.path.join(order_dir, "previews", preview_name))
                 connection.execute("INSERT INTO preview_files (delivery_file_id, stored_name, content_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?)", (cursor.lastrowid, preview_name, "image/jpeg", len(preview_raw), created_at))
             saved.append({"original_name": original_name, "stored_name": stored_name, "size_bytes": len(raw), "previewAvailable": bool(preview_name)})
-        next_status = "Completed" if payment else "Preview Ready"
+        next_status = "Delivered" if payment else "Preview Ready"
         connection.execute("UPDATE orders SET status = ? WHERE id = ?", (next_status, order["id"]))
     return jsonify({"reference": reference, "status": next_status, "files": saved}), 201
 
