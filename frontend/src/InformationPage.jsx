@@ -1,0 +1,5 @@
+import React from 'react'
+
+export default function InformationPage({ page, onOrder }) {
+  return <main className="information-page"><div className="information-head"><a className="services-back" href="/">← TYPEARENA HUB</a><div className="kicker">{page.kicker}</div><h1>{page.heading.split('\n').map((line, index) => <React.Fragment key={line}>{index > 0 && <br />}<span className={index > 0 ? 'accent-line' : ''}>{line}</span></React.Fragment>)}</h1><p>{page.intro}</p><button className="button orange" onClick={onOrder}>Start a request ↗</button></div><section className="information-sections" aria-label={page.kicker}>{page.sections.map((section, index) => <article key={section[0]}><span className="information-number">{String(index + 1).padStart(2, '0')}</span><div><h2>{section[0]}</h2><p>{section[1]}</p></div></article>)}</section><nav className="information-links" aria-label="TYPEARENA HUB information"><a href="/services">Services</a><a href="/how-it-works">How it works</a><a href="/about">About us</a><a href="/faq">FAQs</a></nav></main>
+}

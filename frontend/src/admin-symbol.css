@@ -82,6 +82,9 @@ button:disabled {
 .payment-details { display: flex; flex-direction: column; gap: 7px; margin-top: 20px; padding: 15px; background: #fff0e6; border-left: 3px solid var(--orange); border-radius: 7px; color: #6f655e; font-size: 12px; }
 .payment-details > b { color: var(--charcoal); font: 600 12px 'Space Grotesk'; }
 .payment-details strong { color: var(--orange); }
+.admin-payment { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:10px 12px; background:#fff7f1; border:1px solid #f3d6c1; border-radius:7px; color:#756b64; font-size:11px; }
+.admin-payment b { color:var(--charcoal); font-family:'Space Grotesk'; }
+.admin-payment .quote-button { padding:7px 10px; }
 .payment-details p { margin: 3px 0 0; line-height: 1.55; white-space: pre-line; }
 .deliverables { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; padding: 15px; background: #fff; border: 1px solid #eee1d8; border-radius: 8px; }
 .deliverables > b { width: 100%; color: var(--charcoal); font: 600 12px 'Space Grotesk'; }

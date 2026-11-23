@@ -10,6 +10,7 @@ export default function CustomerPortal({ onClose }) {
   const [quote, setQuote] = useState(null)
   const [tracking, setTracking] = useState(null)
   const [deliverables, setDeliverables] = useState([])
+  const [previews, setPreviews] = useState([])
   const [paymentReference, setPaymentReference] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -26,12 +27,25 @@ export default function CustomerPortal({ onClose }) {
       const quoteResponse = await fetch(`/api/orders/${ref}/quotation${query}`)
       const quoteData = await quoteResponse.json()
       const activeStatuses = ['Payment Confirmed', 'In Progress', 'Completed', 'Delivered']
+      if (quoteResponse.ok && quoteData.status === 'Preview Ready') {
+        const trackingResponse = await fetch(`/api/orders/${ref}/tracking${query}`)
+        const trackingData = await trackingResponse.json()
+        if (!trackingResponse.ok) throw new Error(trackingData.error || 'We could not load the preview.')
+        setQuote(quoteData); setTracking(trackingData); setDeliverables([])
+        const previewsResponse = await fetch(`/api/orders/${ref}/previews${query}`)
+        if (previewsResponse.ok) setPreviews(await previewsResponse.json())
+        return
+      }
       if (quoteResponse.ok && !activeStatuses.includes(quoteData.status)) { setQuote(quoteData); setTracking(null); return }
       const trackingResponse = await fetch(`/api/orders/${ref}/tracking${query}`)
       const trackingData = await trackingResponse.json()
       if (!trackingResponse.ok) throw new Error(trackingData.error || quoteData.error || 'We could not find that order.')
-      setTracking(trackingData); setQuote(null); setDeliverables([])
-      if (['Completed', 'Delivered'].includes(trackingData.status)) {
+      setTracking(trackingData); setQuote(null); setDeliverables([]); setPreviews([])
+      if (['Preview Ready', 'Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(trackingData.status)) {
+        const previewsResponse = await fetch(`/api/orders/${ref}/previews${query}`)
+        if (previewsResponse.ok) setPreviews(await previewsResponse.json())
+      }
+      if (['Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(trackingData.status)) {
         const filesResponse = await fetch(`/api/orders/${ref}/deliverables${query}`)
         if (filesResponse.ok) setDeliverables(await filesResponse.json())
       }
@@ -68,6 +82,11 @@ export default function CustomerPortal({ onClose }) {
     const blob = await response.blob(); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.original_name; link.click(); URL.revokeObjectURL(link.href)
   }
 
+  const viewPreview = (file) => {
+    if (!file.previewAvailable) { setMessage('A preview is not available for this file. Please contact TYPEARENA HUB.'); return }
+    window.open(`/api/orders/${tracking.reference}/previews/${encodeURIComponent(file.preview_stored_name)}?phone=${encodeURIComponent(normalizePhone(phone))}`, '_blank', 'noopener,noreferrer')
+  }
+
   const refreshTracking = async () => {
     if (!tracking || busy) return
     setBusy(true); setMessage('')
@@ -77,18 +96,24 @@ export default function CustomerPortal({ onClose }) {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Could not refresh this order.')
       setTracking(data)
-      if (['Completed', 'Delivered'].includes(data.status)) {
+      if (['Preview Ready', 'Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(data.status)) {
+        const previewsResponse = await fetch(`/api/orders/${tracking.reference}/previews?phone=${encodeURIComponent(normalizedPhone)}`)
+        if (previewsResponse.ok) setPreviews(await previewsResponse.json())
+      }
+      if (['Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(data.status)) {
         const filesResponse = await fetch(`/api/orders/${tracking.reference}/deliverables?phone=${encodeURIComponent(normalizedPhone)}`)
         if (filesResponse.ok) setDeliverables(await filesResponse.json())
       }
     } catch (cause) { setMessage(cause.message) } finally { setBusy(false) }
   }
 
-  useEffect(() => { if (!tracking) return undefined; const poll = async () => { if (document.hidden) return; try { const normalizedPhone = normalizePhone(phone); const response = await fetch(`/api/orders/${tracking.reference}/tracking?phone=${encodeURIComponent(normalizedPhone)}`); if (!response.ok) return; const data = await response.json(); setTracking(data); if (['Completed', 'Delivered'].includes(data.status)) { const filesResponse = await fetch(`/api/orders/${tracking.reference}/deliverables?phone=${encodeURIComponent(normalizedPhone)}`); if (filesResponse.ok) setDeliverables(await filesResponse.json()) } } catch { /* keep the current status if a background refresh fails */ } }; const interval = window.setInterval(poll, 10000); return () => window.clearInterval(interval) }, [tracking?.reference, phone])
-  const reset = () => { setQuote(null); setTracking(null); setDeliverables([]); setMessage('') }
+  useEffect(() => { if (!tracking) return undefined; const poll = async () => { if (document.hidden) return; try { const normalizedPhone = normalizePhone(phone); const response = await fetch(`/api/orders/${tracking.reference}/tracking?phone=${encodeURIComponent(normalizedPhone)}`); if (!response.ok) return; const data = await response.json(); setTracking(data); if (['Preview Ready', 'Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(data.status)) { const previewsResponse = await fetch(`/api/orders/${tracking.reference}/previews?phone=${encodeURIComponent(normalizedPhone)}`); if (previewsResponse.ok) setPreviews(await previewsResponse.json()) } if (['Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(data.status)) { const filesResponse = await fetch(`/api/orders/${tracking.reference}/deliverables?phone=${encodeURIComponent(normalizedPhone)}`); if (filesResponse.ok) setDeliverables(await filesResponse.json()) } } catch { /* keep the current status if a background refresh fails */ } }; const interval = window.setInterval(poll, 10000); return () => window.clearInterval(interval) }, [tracking?.reference, phone])
+  const reset = () => { setQuote(null); setTracking(null); setDeliverables([]); setPreviews([]); setMessage('') }
   const paymentDetails = quote && quote.decision === 'accepted' && !quote.paymentStatus
 
   return <div className="form-overlay"><div className="request-form portal-form">
+    {tracking && previews.length > 0 && <PreviewList previews={previews} reference={tracking.reference} phone={phone} paid={['Payment Confirmed', 'In Progress', 'Completed', 'Delivered'].includes(tracking.status)} onPreview={viewPreview} />}
+    {tracking && ['Payment Confirmed', 'In Progress'].includes(tracking.status) && deliverables.length > 0 && <DownloadList files={deliverables} onDownload={downloadDeliverable} />}
     <div className="form-head"><div><div className="kicker">CUSTOMER PORTAL</div><h2>Track your<br /><em>order.</em></h2></div><button type="button" className="close-form" onClick={onClose}>×</button></div>
     {!quote && !tracking && <form onSubmit={lookup}><p className="form-note">Use the order reference and phone number from your request confirmation. Your quotation and payment instructions will appear here when ready.</p><label className="portal-label">Order reference<input required value={reference} onChange={(event) => setReference(event.target.value)} placeholder="TH-AB12CD34" /></label><label className="portal-label">Phone number<input required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="07XX XXX XXX" /></label>{message && <div className="admin-error">{message}</div>}<button className="button orange form-submit" disabled={busy}>{busy ? 'Checking...' : 'View order'} {!busy && <Arrow />}</button></form>}
     {tracking && <div className="tracking-view"><div className="quote-summary"><span>{tracking.reference}</span><strong>{tracking.service}</strong><small>Deadline: {tracking.deadline}</small></div><div className="tracking-status">Current status <b>{tracking.status}</b></div><div className="tracking-list">{tracking.milestones.map((milestone) => <div className={milestone.complete ? 'tracking-step complete' : 'tracking-step'} key={milestone.label}><span>{milestone.complete ? '✓' : '○'}</span><strong>{milestone.label}</strong></div>)}</div>{['Completed', 'Delivered'].includes(tracking.status) && <div className="deliverables"><b>Completed files</b>{deliverables.length ? deliverables.map((file) => <button key={file.stored_name} onClick={() => downloadDeliverable(file)}>{file.original_name} <span>↓</span></button>) : <p>Your completed files will appear here once uploaded.</p>}</div>}{message && <div className="admin-error">{message}</div>}<button className="portal-reset" onClick={reset}>Look up another order</button></div>}
@@ -96,4 +121,12 @@ export default function CustomerPortal({ onClose }) {
     {tracking && <div className="portal-delivery-note">Delivery: <b>{tracking.deliveryMethod === 'WhatsApp' ? 'WhatsApp' : 'Customer portal (main)'}</b></div>}
     {tracking && <button className="refresh-order" onClick={refreshTracking} disabled={busy}>{busy ? 'Refreshing...' : 'Refresh order status'}</button>}
   </div></div>
+}
+
+function PreviewList({ previews, paid, onPreview }) {
+  return <section className="preview-list" aria-label="Work previews"><div className="kicker">WORK PREVIEW</div><p className="preview-note">These watermarked previews let you review the work before payment confirmation. Screenshots cannot be fully prevented, so please use them only for review.</p>{previews.map((file) => <div className="preview-item" key={file.stored_name}><div><strong>{file.original_name}</strong><small>{file.previewAvailable ? 'Watermarked preview available' : 'Preview unavailable for this file type'}</small></div>{file.previewAvailable && <button className="button outline" type="button" onClick={() => onPreview(file)}>View preview ↗</button>}{paid && file.downloadAvailable && <span className="preview-unlocked">Download unlocked below</span>}</div>)}</section>
+}
+
+function DownloadList({ files, onDownload }) {
+  return <section className="deliverables preview-downloads"><div className="kicker">PAYMENT CONFIRMED</div><b>Your completed files are unlocked.</b>{files.map((file) => <button key={file.stored_name} onClick={() => onDownload(file)}>{file.original_name} <span>↓</span></button>)}</section>
 }

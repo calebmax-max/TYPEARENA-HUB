@@ -10,8 +10,11 @@ import LegalModal from './LegalModal.jsx'
 import OrderForm from './OrderForm.jsx'
 import PublicFooter from './PublicFooter.jsx'
 import ServicesPage from './ServicesPage.jsx'
+import ServiceDetailPage, { getServiceBySlug } from './ServiceDetailPage.jsx'
+import InformationPage from './InformationPage.jsx'
 import ErrorPage from './ErrorPage.jsx'
 import { parsePricing } from './pricing.js'
+import { homeSeo, informationPages, servicesSeo, setSeo } from './seo.js'
 
 const API_BASE = String(import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const browserFetch = window.fetch.bind(window)
@@ -42,6 +45,9 @@ function App() {
   const [copiedReference, setCopiedReference] = useState(false)
   const [contactSettings, setContactSettings] = useState({ email: '', operating_hours: 'Online every day', whatsapp: '254762220299' })
   const [offline, setOffline] = useState(!navigator.onLine)
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '')
+  const serviceSlug = path.startsWith('services/') ? path.slice('services/'.length) : ''
+  const informationSlug = ['how-it-works', 'about', 'faq'].includes(path) ? path : ''
   useEffect(() => { const openPrivacy = () => setLegalOpen('privacy'); window.addEventListener('open-privacy', openPrivacy); return () => window.removeEventListener('open-privacy', openPrivacy) }, [])
   useEffect(() => { const online = () => setOffline(false); const offlineEvent = () => setOffline(true); window.addEventListener('online', online); window.addEventListener('offline', offlineEvent); return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offlineEvent) } }, [])
   useEffect(() => {
@@ -53,6 +59,12 @@ function App() {
       else localStorage.removeItem('typearena-active-order')
     }).catch(() => setSubmittedOrder(saved))
   }, [])
+  useEffect(() => {
+    const page = serviceSlug ? getServiceBySlug(serviceSlug) : null
+    const info = informationSlug ? informationPages[informationSlug] : null
+    const schema = informationSlug === 'faq' ? { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: info.sections.map(([name, answer]) => ({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text: answer } })) } : info ? { '@context': 'https://schema.org', '@type': 'WebPage', name: info.title, description: info.description, url: `${window.location.origin}/${informationSlug}` } : null
+    setSeo(page ? { title: page.title, description: page.description, path: `/services/${serviceSlug}`, schema: { '@context': 'https://schema.org', '@type': 'Service', name: page.name, description: page.description, provider: { '@type': 'Organization', name: 'TYPEARENA HUB', url: `${window.location.origin}/` }, areaServed: { '@type': 'Country', name: 'Kenya' } } } : info ? { ...info, path: `/${informationSlug}`, schema } : path === 'services' ? servicesSeo : homeSeo(contactSettings))
+  }, [contactSettings, serviceSlug, informationSlug])
   const scrollTo = (id) => { setMenuOpen(false); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }) }
   const openOrder = (service = '') => { setSelectedService(service); setSubmittedOrder(null); setOrderOpen(true) }
   useEffect(() => { const trust = document.querySelector('.trust-section > div:first-child'); if (!trust) return undefined; trust.querySelectorAll('.testimonial-note').forEach((note) => note.remove()); let entries = []; try { entries = String(contactSettings.testimonials || '').split('\n').map((line) => line.split('|').map((part) => part.trim())).filter((parts) => parts[0] && parts[1]) } catch { entries = [] } if (!entries.length) return undefined; entries.slice(0, 3).forEach(([quote, name, role]) => { const note = document.createElement('div'); note.className = 'testimonial-note'; note.innerHTML = `<span>“${quote.replace(/[<>]/g, '')}”</span><strong>${name.replace(/[<>]/g, '')}${role ? ` · ${role.replace(/[<>]/g, '')}` : ''}</strong>`; trust.appendChild(note) }); return () => trust.querySelectorAll('.testimonial-note').forEach((note) => note.remove()) }, [contactSettings.testimonials])
@@ -97,8 +109,10 @@ function App() {
   useEffect(() => { const labels = { 'CVs and resumes': 'CV creation', Letters: 'Cover letter', 'Posters and flyers': 'Posters and flyers' }; document.querySelectorAll('.service-details li').forEach((item) => { const next = labels[item.textContent.trim()]; if (next) item.textContent = next }) }, [])
   useEffect(() => { const prices = parsePricing(contactSettings.pricing); document.querySelectorAll('.service-details li').forEach((item) => { const raw = prices[item.textContent.trim()]; if (raw) item.setAttribute('data-price', raw.startsWith('From ') ? raw : `From ${raw}`) }) }, [contactSettings.pricing])
   if (offline) return <ErrorPage offline />
-  if (window.location.pathname === '/services') return <ServicesPage onOrder={() => { window.location.href = '/#order' }} />
-  if (window.location.pathname !== '/') return <ErrorPage />
+  if (path === 'services') return <ServicesPage onOrder={() => { window.location.href = '/#order' }} />
+  if (serviceSlug) { const service = getServiceBySlug(serviceSlug); if (service) return <ServiceDetailPage service={service} onOrder={() => { window.location.href = '/#order' }} />; return <ErrorPage /> }
+  if (informationSlug) return <InformationPage page={informationPages[informationSlug]} onOrder={() => { window.location.href = '/#order' }} />
+  if (path !== '') return <ErrorPage />
   return <div className="site-shell">{submitError && <div className="global-submit-error" role="alert">{submitError}</div>}
     <header className="topbar"><button className="logo" onClick={() => scrollTo('top')} aria-label="TYPEARENA HUB home"><span className="logo-mark">T</span><span>TYPEARENA <b>HUB</b></span></button><button className="menu-toggle" onClick={() => setMenuOpen(!menuOpen)} aria-label="Toggle navigation">{menuOpen ? '×' : '☰'}</button><nav className={menuOpen ? 'nav open' : 'nav'}><button onClick={() => scrollTo('services')}>Services</button><button onClick={() => scrollTo('how-it-works')}>How it works</button><button onClick={() => scrollTo('about')}>About us</button></nav><button className="nav-track" onClick={() => setPortalOpen(true)}>Track an order</button><button className="nav-cta" onClick={() => openOrder()}>Get started <Arrow /></button></header>
     <main id="top">

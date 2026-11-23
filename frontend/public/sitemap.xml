@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Replace YOUR-PRODUCTION-DOMAIN.example with the deployed site domain. -->
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services/typing-formatting</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services/cv</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services/applications</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services/presentations</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/services/data-entry</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/how-it-works</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/about</loc></url>
+  <url><loc>https://YOUR-PRODUCTION-DOMAIN.example/faq</loc></url>
+</urlset>

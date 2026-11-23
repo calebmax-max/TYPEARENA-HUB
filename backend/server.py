@@ -19,6 +19,10 @@ import threading
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 import cv2, numpy as np, io
+try:
+    import fitz
+except ImportError:
+    fitz = None
 
 try:
     import pymysql
@@ -146,7 +150,7 @@ def store_bytes(raw, key, content_type, local_path):
 
 def remove_storage_prefix(reference):
     if OBJECT_STORAGE_ENABLED:
-        for kind in ("orders", "deliverables"):
+        for kind in ("orders", "deliverables", "previews"):
             listed = OBJECT_STORAGE_CLIENT.list_objects_v2(Bucket=OBJECT_STORAGE_BUCKET, Prefix=f"{kind}/{reference}/")
             keys = [{"Key": item["Key"]} for item in listed.get("Contents", [])]
             if keys:
@@ -166,6 +170,44 @@ def download_response(kind, reference, stored_name, original_name, content_type=
     if not path.startswith(root + os.sep) or not os.path.exists(path):
         return jsonify({"error": "File not found."}), 404
     return send_file(path, as_attachment=True, download_name=original_name, mimetype=content_type)
+
+def preview_response(reference, stored_name, content_type):
+    if OBJECT_STORAGE_ENABLED:
+        url = OBJECT_STORAGE_CLIENT.generate_presigned_url("get_object", Params={"Bucket": OBJECT_STORAGE_BUCKET, "Key": storage_key("previews", reference, stored_name), "ResponseContentDisposition": "inline", "ResponseContentType": content_type}, ExpiresIn=300)
+        return redirect(url)
+    root = os.path.abspath(os.path.join(DELIVERY_UPLOAD_DIR, reference, "previews"))
+    path = os.path.abspath(os.path.join(root, stored_name))
+    if not path.startswith(root + os.sep) or not os.path.exists(path):
+        return jsonify({"error": "Preview not found."}), 404
+    response = send_file(path, as_attachment=False, mimetype=content_type)
+    response.headers["Cache-Control"] = "private, max-age=300"
+    response.headers["Content-Disposition"] = "inline"
+    return response
+
+def create_watermarked_preview(raw, extension):
+    image = None
+    if extension == "pdf" and fitz:
+        document = fitz.open(stream=raw, filetype="pdf")
+        if document.page_count:
+            page = document.load_page(0)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+            image = cv2.imdecode(np.frombuffer(pixmap.tobytes("jpg", jpg_quality=82), np.uint8), cv2.IMREAD_COLOR)
+        document.close()
+    elif extension in {"jpg", "jpeg", "png", "webp"}:
+        image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return None
+    height, width = image.shape[:2]
+    scale = min(1, 1280 / max(width, 1))
+    if scale < 1:
+        image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+    label = "TYPEARENA HUB - PREVIEW"
+    position = (28, max(48, image.shape[0] // 2))
+    size = max(.7, image.shape[1] / 1800)
+    cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.putText(image, label, position, cv2.FONT_HERSHEY_SIMPLEX, size, (80, 55, 35), 1, cv2.LINE_AA)
+    ok, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 72])
+    return buffer.tobytes() if ok else None
 
 def malware_scan(raw, filename):
     """Scan bytes with ClamAV using its INSTREAM protocol.
@@ -321,6 +363,15 @@ def init_order_db():
                 size_bytes INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(order_id) REFERENCES orders(id)
+            );
+            CREATE TABLE IF NOT EXISTS preview_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                delivery_file_id INTEGER NOT NULL,
+                stored_name TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(delivery_file_id) REFERENCES delivery_files(id)
             );
             CREATE TABLE IF NOT EXISTS business_settings (
                 `key` VARCHAR(64) PRIMARY KEY,
@@ -629,6 +680,7 @@ def track_customer_order(reference):
         ("Request reviewed", "Under Review"),
         ("Quotation issued", "Quotation Sent"),
         ("Quotation accepted", "Quotation Accepted"),
+        ("Preview ready", "Preview Ready"),
         ("Payment confirmed", "Payment Confirmed"),
         ("Work in progress", "In Progress"),
         ("Work completed", "Completed"),
@@ -653,19 +705,57 @@ def list_customer_deliverables(reference):
     order = safe_order(reference, phone)
     if not order:
         return jsonify({"error": "Order not found for those details."}), 404
-    if order["status"] not in {"Completed", "Delivered"}:
+    if order["status"] not in {"Payment Confirmed", "In Progress", "Completed", "Delivered"}:
         return jsonify({"error": "Deliverables are not available yet."}), 409
     with db_connection() as connection:
+        confirmed = connection.execute("SELECT id FROM payments WHERE order_id = ? AND status = 'Confirmed' ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
+        if not confirmed:
+            return jsonify({"error": "Payment must be confirmed by TYPEARENA HUB before downloads are unlocked."}), 403
         files = connection.execute("SELECT original_name, stored_name, content_type, size_bytes, created_at FROM delivery_files WHERE order_id = ? ORDER BY id DESC", (order["id"],)).fetchall()
     return jsonify([dict(file) for file in files])
+
+@app.route("/api/orders/<reference>/previews", methods=["GET"])
+def list_customer_previews(reference):
+    phone = (request.args.get("phone") or "").strip()
+    order = safe_order(reference, phone)
+    if not order or order["status"] not in {"Preview Ready", "Payment Confirmed", "In Progress", "Completed", "Delivered"}:
+        return jsonify({"error": "Previews are not available yet."}), 409
+    with db_connection() as connection:
+        confirmed = connection.execute("SELECT id FROM payments WHERE order_id = ? AND status = 'Confirmed' ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
+        files = connection.execute("""
+            SELECT d.original_name, d.stored_name, d.content_type, d.size_bytes, d.created_at,
+                   p.stored_name AS preview_stored_name, p.content_type AS preview_content_type
+            FROM delivery_files d LEFT JOIN preview_files p ON p.delivery_file_id = d.id
+            WHERE d.order_id = ? ORDER BY d.id DESC
+        """, (order["id"],)).fetchall()
+    return jsonify([{**dict(file), "previewAvailable": bool(file["preview_stored_name"]), "downloadAvailable": bool(confirmed)} for file in files])
+
+@app.route("/api/orders/<reference>/previews/<stored_name>", methods=["GET"])
+def view_customer_preview(reference, stored_name):
+    phone = (request.args.get("phone") or "").strip()
+    order = safe_order(reference, phone)
+    if not order or order["status"] not in {"Preview Ready", "Payment Confirmed", "In Progress", "Completed", "Delivered"}:
+        return jsonify({"error": "This preview is not available."}), 404
+    with db_connection() as connection:
+        preview = connection.execute("""
+            SELECT p.stored_name, p.content_type FROM preview_files p
+            JOIN delivery_files d ON d.id = p.delivery_file_id
+            WHERE d.order_id = ? AND p.stored_name = ?
+        """, (order["id"], stored_name)).fetchone()
+    if not preview:
+        return jsonify({"error": "Preview not found."}), 404
+    return preview_response(reference, preview["stored_name"], preview["content_type"])
 
 @app.route("/api/orders/<reference>/deliverables/<stored_name>", methods=["GET"])
 def download_customer_deliverable(reference, stored_name):
     phone = (request.args.get("phone") or "").strip()
     order = safe_order(reference, phone)
-    if not order or order["status"] not in {"Completed", "Delivered"}:
+    if not order or order["status"] not in {"Payment Confirmed", "In Progress", "Completed", "Delivered"}:
         return jsonify({"error": "This file is not available."}), 404
     with db_connection() as connection:
+        confirmed = connection.execute("SELECT id FROM payments WHERE order_id = ? AND status = 'Confirmed' ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
+        if not confirmed:
+            return jsonify({"error": "Payment must be confirmed by TYPEARENA HUB before downloads are unlocked."}), 403
         file_row = connection.execute("SELECT original_name, stored_name FROM delivery_files WHERE order_id = ? AND stored_name = ?", (order["id"], stored_name)).fetchone()
     if not file_row:
         return jsonify({"error": "File not found."}), 404
@@ -713,14 +803,22 @@ def upload_admin_deliverables(reference):
         checked_files.append((uploaded, original_name, raw))
     os.makedirs(order_dir, exist_ok=True)
     with db_connection() as connection:
+        payment = connection.execute("SELECT id FROM payments WHERE order_id = ? AND status = 'Confirmed' ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
         for uploaded, original_name, raw in checked_files:
             stored_name = f"{uuid.uuid4().hex}_{original_name}"
             store_bytes(raw, storage_key("deliverables", reference, stored_name), uploaded.content_type, os.path.join(order_dir, stored_name))
             created_at = datetime.now(timezone.utc).isoformat()
-            connection.execute("INSERT INTO delivery_files (order_id, original_name, stored_name, content_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)", (order["id"], original_name, stored_name, uploaded.content_type, len(raw), created_at))
-            saved.append({"original_name": original_name, "stored_name": stored_name, "size_bytes": len(raw)})
-        connection.execute("UPDATE orders SET status = 'Completed' WHERE id = ?", (order["id"],))
-    return jsonify({"reference": reference, "status": "Completed", "files": saved}), 201
+            cursor = connection.execute("INSERT INTO delivery_files (order_id, original_name, stored_name, content_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)", (order["id"], original_name, stored_name, uploaded.content_type, len(raw), created_at))
+            preview_raw = create_watermarked_preview(raw, original_name.rsplit(".", 1)[-1].lower() if "." in original_name else "")
+            preview_name = None
+            if preview_raw:
+                preview_name = f"{uuid.uuid4().hex}_{os.path.splitext(original_name)[0]}.jpg"
+                store_bytes(preview_raw, storage_key("previews", reference, preview_name), "image/jpeg", os.path.join(order_dir, "previews", preview_name))
+                connection.execute("INSERT INTO preview_files (delivery_file_id, stored_name, content_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?)", (cursor.lastrowid, preview_name, "image/jpeg", len(preview_raw), created_at))
+            saved.append({"original_name": original_name, "stored_name": stored_name, "size_bytes": len(raw), "previewAvailable": bool(preview_name)})
+        next_status = "Completed" if payment else "Preview Ready"
+        connection.execute("UPDATE orders SET status = ? WHERE id = ?", (next_status, order["id"]))
+    return jsonify({"reference": reference, "status": next_status, "files": saved}), 201
 
 @app.route("/api/orders/<reference>/quotation/decision", methods=["OPTIONS", "POST"])
 def decide_customer_quotation(reference):
@@ -801,7 +899,7 @@ def update_admin_order(reference):
             order = connection.execute("SELECT id FROM orders WHERE reference = ?", (reference,)).fetchone()
             if not order:
                 return jsonify({"error": "Order not found."}), 404
-            for table in ("order_files", "delivery_files", "quotations", "payments"):
+            for table in ("order_files", "preview_files", "delivery_files", "quotations", "payments"):
                 connection.execute(f"DELETE FROM {table} WHERE order_id = ?", (order["id"],))
             connection.execute("DELETE FROM orders WHERE id = ?", (order["id"],))
         for root in (os.path.join(ORDER_UPLOAD_DIR, reference), os.path.join(DELIVERY_UPLOAD_DIR, reference)):
@@ -810,7 +908,7 @@ def update_admin_order(reference):
         return jsonify({"reference": reference, "deleted": True})
     payload = request.get_json(silent=True) or {}
     status = (payload.get("status") or "").strip()
-    allowed_statuses = {"New Request", "Under Review", "Awaiting Quotation", "Quotation Sent", "Quotation Accepted", "Awaiting Payment", "Payment Confirmed", "In Progress", "Completed", "Delivered", "Cancelled", "Rejected"}
+    allowed_statuses = {"New Request", "Under Review", "Awaiting Quotation", "Quotation Sent", "Quotation Accepted", "Preview Ready", "Awaiting Payment", "Payment Confirmed", "In Progress", "Completed", "Delivered", "Cancelled", "Rejected"}
     if status not in allowed_statuses:
         return jsonify({"error": "That order status is not available."}), 400
     with db_connection() as connection:
