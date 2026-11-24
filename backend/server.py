@@ -1076,8 +1076,10 @@ def update_admin_payment(reference):
             return jsonify({"error": "No payment submission found."}), 404
         now = datetime.now(timezone.utc).isoformat() if status == "Confirmed" else None
         connection.execute("UPDATE payments SET status = ?, confirmed_at = ?, notes = ? WHERE id = ?", (status, now, str(payload.get("notes", "")).strip(), payment["id"]))
-        connection.execute("UPDATE orders SET status = ? WHERE id = ?", ("Payment Confirmed" if status == "Confirmed" else "Awaiting Payment", payment["order_id"]))
-    return jsonify({"reference": reference, "status": status})
+        has_deliverables = bool(connection.execute("SELECT id FROM delivery_files WHERE order_id = ? LIMIT 1", (payment["order_id"],)).fetchone())
+        order_status = "Delivered" if status == "Confirmed" and has_deliverables else ("Payment Confirmed" if status == "Confirmed" else "Awaiting Payment")
+        connection.execute("UPDATE orders SET status = ? WHERE id = ?", (order_status, payment["order_id"]))
+    return jsonify({"reference": reference, "status": status, "orderStatus": order_status})
 
 @app.route("/api/admin/orders/<reference>", methods=["OPTIONS", "PATCH", "DELETE"])
 def update_admin_order(reference):
@@ -1107,7 +1109,10 @@ def update_admin_order(reference):
         order = connection.execute("SELECT id FROM orders WHERE reference = ?", (reference,)).fetchone()
         if not order:
             return jsonify({"error": "Order not found."}), 404
-        cursor = connection.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order["id"]))
+        effective_status = status
+        if status == "Payment Confirmed" and connection.execute("SELECT id FROM delivery_files WHERE order_id = ? LIMIT 1", (order["id"],)).fetchone():
+            effective_status = "Delivered"
+        cursor = connection.execute("UPDATE orders SET status = ? WHERE id = ?", (effective_status, order["id"]))
         if status == "Payment Confirmed":
             payment = connection.execute("SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
             if payment:
@@ -1119,7 +1124,7 @@ def update_admin_order(reference):
     # The order existence was already verified above. MySQL can report zero
     # affected rows when the requested status is already the current status;
     # that is still a successful admin action, not a missing order.
-    return jsonify({"reference": reference, "status": status})
+    return jsonify({"reference": reference, "status": effective_status})
 
 @app.route("/api/orders", methods=["OPTIONS", "POST"])
 def create_order():
