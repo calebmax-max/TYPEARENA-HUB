@@ -45,3 +45,4 @@
 .confirmation>div:first-child::before{content:'SAVE THIS ORDER CODE';display:block;margin-bottom:10px;color:var(--orange);font:700 10px 'Space Grotesk';letter-spacing:.16em}.confirmation>div:first-child>p{max-width:520px}.confirmation>div:first-child>p::after{content:' Use this code together with the same phone number whenever you track your order.';font-weight:600;color:var(--charcoal)}
 .portal-status{background:#e8f7ed;color:#267344;border:1px solid #b9dfc5}
 .quote-form-note{margin:0 0 16px;color:#756b64;font-size:11px;line-height:1.5}.quote-form .quote-fields{grid-template-columns:1fr 1fr}.quote-form .quote-fields .quote-full{grid-column:1 / -1}@media(max-width:560px){.quote-form .quote-fields{grid-template-columns:1fr}.quote-form .quote-fields .quote-full{grid-column:auto}}
+.deliverables button{white-space:normal;overflow-wrap:anywhere;word-break:break-word;min-width:0}.deliverables button span:last-child{flex:0 0 auto;white-space:nowrap}
