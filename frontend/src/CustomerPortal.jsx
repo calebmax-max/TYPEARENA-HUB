@@ -89,10 +89,16 @@ export default function CustomerPortal({ onClose }) {
     } catch (cause) { setMessage(cause.message) } finally { setBusy(false) }
   }
 
-  const downloadDeliverable = async (file) => {
-    const response = await fetch(`/api/orders/${tracking.reference}/deliverables/${encodeURIComponent(file.stored_name)}?phone=${encodeURIComponent(normalizePhone(phone))}`)
-    if (!response.ok) { setMessage('This file could not be downloaded.'); return }
-    const blob = await response.blob(); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.original_name; link.click(); URL.revokeObjectURL(link.href)
+  const downloadDeliverable = (file) => {
+    if (!tracking) return
+    const downloadUrl = `${API_BASE}/api/orders/${tracking.reference}/deliverables/${encodeURIComponent(file.stored_name)}?phone=${encodeURIComponent(normalizePhone(phone))}`
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = file.original_name
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   const viewPreview = (file) => {
