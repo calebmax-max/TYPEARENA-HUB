@@ -90,7 +90,7 @@ export default function CustomerPortal({ onClose }) {
   }
 
   const downloadDeliverable = async (file) => {
-    const response = await fetch(`/api/orders/${tracking.reference}/deliverables/${encodeURIComponent(file.stored_name)}?phone=${encodeURIComponent(phone.trim())}`)
+    const response = await fetch(`/api/orders/${tracking.reference}/deliverables/${encodeURIComponent(file.stored_name)}?phone=${encodeURIComponent(normalizePhone(phone))}`)
     if (!response.ok) { setMessage('This file could not be downloaded.'); return }
     const blob = await response.blob(); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.original_name; link.click(); URL.revokeObjectURL(link.href)
   }

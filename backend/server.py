@@ -1108,8 +1108,9 @@ def update_admin_order(reference):
             payment = connection.execute("SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order["id"],)).fetchone()
             if payment:
                 connection.execute("UPDATE payments SET status = 'Pending Verification', confirmed_at = NULL, notes = ? WHERE id = ?", ("Awaiting administrator confirmation", payment["id"]))
-    if cursor.rowcount == 0:
-        return jsonify({"error": "Order not found."}), 404
+    # The order existence was already verified above. MySQL can report zero
+    # affected rows when the requested status is already the current status;
+    # that is still a successful admin action, not a missing order.
     return jsonify({"reference": reference, "status": status})
 
 @app.route("/api/orders", methods=["OPTIONS", "POST"])
