@@ -73,6 +73,9 @@ app.logger.setLevel(logging.INFO)
 MAX_ORDER_FILES = 10
 MAX_ORDER_TOTAL_BYTES = 100 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_ORDER_TOTAL_BYTES + (1 * 1024 * 1024)
+
+def configured_allowed_origins():
+    return {origin.strip().rstrip("/") for origin in os.environ.get("TONIE_ALLOWED_ORIGIN", "").split(",") if origin.strip()}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ORDER_FILE_BYTES = 20 * 1024 * 1024
@@ -578,15 +581,20 @@ def start_request_metrics():
     g.request_started_at = time.perf_counter()
     if request.method in {"POST", "PATCH", "DELETE"}:
         origin = request.headers.get("Origin", "").rstrip("/")
-        allowed_origin = os.environ.get("TONIE_ALLOWED_ORIGIN", "").rstrip("/")
+        allowed_origins = configured_allowed_origins()
         local_origins = {"http://127.0.0.1:5173", "http://localhost:5173"}
-        if origin and ((allowed_origin and allowed_origin != "*" and origin != allowed_origin) or (not allowed_origin and os.environ.get("TONIE_ENV") == "production") or (not allowed_origin and os.environ.get("TONIE_ENV") != "production" and origin not in local_origins)):
+        if origin and ((allowed_origins and "*" not in allowed_origins and origin not in allowed_origins) or (not allowed_origins and os.environ.get("TONIE_ENV") == "production") or (not allowed_origins and os.environ.get("TONIE_ENV") != "production" and origin not in local_origins)):
             return jsonify({"error": "Request origin is not allowed."}), 403
 
 @app.after_request
 def add_dev_headers(response):
-    allowed_origin = os.environ.get("TONIE_ALLOWED_ORIGIN", "*")
-    response.headers["Access-Control-Allow-Origin"] = allowed_origin
+    origin = request.headers.get("Origin", "").rstrip("/")
+    allowed_origins = configured_allowed_origins()
+    if origin and (not allowed_origins or "*" in allowed_origins or origin in allowed_origins):
+        response.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*" if not allowed_origins else next(iter(allowed_origins))
+    response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
     response.headers["X-Content-Type-Options"] = "nosniff"
