@@ -206,7 +206,7 @@ def download_response(kind, reference, stored_name, original_name, content_type=
 
 def preview_response(reference, stored_name, content_type):
     if OBJECT_STORAGE_ENABLED:
-        url = OBJECT_STORAGE_CLIENT.generate_presigned_url("get_object", Params={"Bucket": OBJECT_STORAGE_BUCKET, "Key": storage_key("previews", reference, stored_name), "ResponseContentDisposition": "inline", "ResponseContentType": content_type}, ExpiresIn=300)
+        url = OBJECT_STORAGE_CLIENT.generate_presigned_url("get_object", Params={"Bucket": OBJECT_STORAGE_BUCKET, "Key": storage_key("previews", reference, stored_name), "ResponseContentDisposition": "inline", "ResponseContentType": content_type, "ResponseCacheControl": "private, max-age=300"}, ExpiresIn=300)
         return redirect(url)
     root = os.path.abspath(os.path.join(DELIVERY_UPLOAD_DIR, reference, "previews"))
     path = os.path.abspath(os.path.join(root, stored_name))
