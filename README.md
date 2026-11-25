@@ -26,6 +26,10 @@ $env:TONIE_REQUIRE_MYSQL = '0'
 python server.py
 ```
 
+For the Render backend, use `backend/render-build.sh` as the build command (with
+the service root directory set to `backend`). It installs LibreOffice so
+PowerPoint, Word and Excel previews retain their visual layout.
+
 ## Production backend
 
 Run from `backend/` with a real MySQL database, object storage, production secrets, and `TONIE_ADMIN_TOKEN_SECRET` configured:
