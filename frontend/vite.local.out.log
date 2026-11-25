@@ -1,8 +1,30 @@
 
 > lumaforge@0.1.0 dev
-> vite --host 127.0.0.1
+> vite
 
 
-  VITE v8.3.8  ready in 3757 ms
+  VITE v8.3.8  ready in 713 ms
 
-  ➜  Local:   http://127.0.0.1:5173/
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+12:58:22 AM [vite] (client) page reload root.local.html
+1:06:38 AM [vite] (client) hmr update /src/main2.jsx
+1:06:38 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:06:38 AM [vite] (client) page reload src/main2.jsx
+1:06:52 AM [vite] (client) hmr update /src/PublicFooter.jsx
+1:07:08 AM [vite] (client) hmr update /src/main2.jsx, /src/ServiceDetailPage.jsx
+1:07:08 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:07:08 AM [vite] (client) page reload src/main2.jsx
+1:07:08 AM [vite] (client) hmr invalidate /src/ServiceDetailPage.jsx Could not Fast Refresh ("getServiceBySlug" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+1:07:08 AM [vite] (client) hmr update /src/main2.jsx
+1:07:08 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:07:08 AM [vite] (client) page reload src/main2.jsx
+1:07:16 AM [vite] (client) hmr update /src/main2.jsx
+1:07:16 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:07:16 AM [vite] (client) page reload src/main2.jsx
+1:07:42 AM [vite] (client) hmr update /src/main2.jsx
+1:07:42 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:07:42 AM [vite] (client) page reload src/main2.jsx
+1:08:50 AM [vite] (client) hmr update /src/main2.jsx
+1:08:50 AM [vite] (client) hmr invalidate /src/main2.jsx No exports
+1:08:50 AM [vite] (client) page reload src/main2.jsx

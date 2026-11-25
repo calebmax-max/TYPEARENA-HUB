@@ -492,6 +492,7 @@ def init_order_db():
                 instructions TEXT NOT NULL,
                 deadline TEXT NOT NULL,
                 delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal',
+                whatsapp_updates INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'New Request',
                 created_at TEXT NOT NULL
             );
@@ -584,7 +585,7 @@ def init_order_db():
         defaults = {
             "business_name": "TYPEARENA HUB",
             "tagline": "Your Cyber. Online.",
-            "whatsapp": "254762220299",
+            "whatsapp": "254700384172",
             "email": "",
             "phone": "",
             "paybill": "",
@@ -604,12 +605,19 @@ def init_order_db():
             order_columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)").fetchall()}
             if "delivery_method" not in order_columns:
                 connection.execute("ALTER TABLE orders ADD COLUMN delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal'")
+            if "whatsapp_updates" not in order_columns:
+                connection.execute("ALTER TABLE orders ADD COLUMN whatsapp_updates INTEGER NOT NULL DEFAULT 1")
         else:
             try:
                 connection.execute("ALTER TABLE orders ADD COLUMN delivery_method VARCHAR(32) NOT NULL DEFAULT 'Portal'")
             except Exception:
                 pass
+            try:
+                connection.execute("ALTER TABLE orders ADD COLUMN whatsapp_updates INTEGER NOT NULL DEFAULT 1")
+            except Exception:
+                pass
         connection.execute("UPDATE orders SET delivery_method = 'Portal' WHERE delivery_method = 'Download'")
+        connection.execute("UPDATE business_settings SET value = '254700384172' WHERE `key` = 'whatsapp' AND value = '254762220299'")
         connection.execute("UPDATE quotations SET payment_terms = 'Full payment after preview approval.' WHERE payment_terms = 'Full payment before work begins.'")
 
 init_order_db()
@@ -622,14 +630,16 @@ def start_request_metrics():
         origin = request.headers.get("Origin", "").rstrip("/")
         allowed_origins = configured_allowed_origins()
         local_origins = {"http://127.0.0.1:5173", "http://localhost:5173"}
-        if origin and ((allowed_origins and "*" not in allowed_origins and origin not in allowed_origins) or (not allowed_origins and os.environ.get("TONIE_ENV") == "production") or (not allowed_origins and os.environ.get("TONIE_ENV") != "production" and origin not in local_origins)):
+        local_development_origin = origin in local_origins and os.environ.get("TONIE_ENV") != "production"
+        if origin and not local_development_origin and ((allowed_origins and "*" not in allowed_origins and origin not in allowed_origins) or (not allowed_origins and os.environ.get("TONIE_ENV") == "production") or (not allowed_origins and os.environ.get("TONIE_ENV") != "production" and origin not in local_origins)):
             return jsonify({"error": "Request origin is not allowed."}), 403
 
 @app.after_request
 def add_dev_headers(response):
     origin = request.headers.get("Origin", "").rstrip("/")
     allowed_origins = configured_allowed_origins()
-    if origin and (not allowed_origins or "*" in allowed_origins or origin in allowed_origins):
+    local_development_origin = origin in {"http://127.0.0.1:5173", "http://localhost:5173"} and os.environ.get("TONIE_ENV") != "production"
+    if origin and (local_development_origin or not allowed_origins or "*" in allowed_origins or origin in allowed_origins):
         response.headers["Access-Control-Allow-Origin"] = origin
     else:
         response.headers["Access-Control-Allow-Origin"] = "*" if not allowed_origins else next(iter(allowed_origins))
@@ -1280,6 +1290,7 @@ def create_order():
     delivery_method = (request.form.get("delivery_method") or "Portal").strip()
     if delivery_method not in {"WhatsApp", "Portal"}:
         return jsonify({"error": "Choose a valid delivery method."}), 400
+    whatsapp_updates = 1 if request.form.get("whatsapp_updates", "on").lower() in {"on", "true", "1", "yes"} else 0
 
     files = request.files.getlist("files")
     idempotency_key = request.headers.get("X-Idempotency-Key", "").strip()
@@ -1326,8 +1337,8 @@ def create_order():
                     if existing_order:
                         return jsonify({"reference": existing_order["reference"], "name": existing_order["name"], "service": existing_order["service"], "deadline": existing_order["deadline"], "status": existing_order["status"], "createdAt": existing_order["created_at"], "fileCount": 0, "duplicate": True}), 200
             cursor = connection.execute(
-                "INSERT INTO orders (reference, name, phone, email, service, instructions, deadline, delivery_method, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (reference, values["name"], values["phone"], request.form.get("email", "").strip(), values["service"], values["instructions"], values["deadline"], delivery_method, created_at),
+                "INSERT INTO orders (reference, name, phone, email, service, instructions, deadline, delivery_method, whatsapp_updates, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (reference, values["name"], values["phone"], request.form.get("email", "").strip(), values["service"], values["instructions"], values["deadline"], delivery_method, whatsapp_updates, created_at),
             )
             if idempotency_key:
                 connection.execute("INSERT INTO order_submission_keys (idempotency_key, reference, created_at) VALUES (?, ?, ?)", (idempotency_key, reference, created_at))

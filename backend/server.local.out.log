@@ -1,0 +1,3 @@
+MySQL unavailable ((1045, "Access denied for user 'faithmutheu1'@'102.0.100.147' (using password: YES)")); using local SQLite fallback.
+ * Serving Flask app 'server'
+ * Debug mode: off

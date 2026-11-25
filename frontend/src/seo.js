@@ -101,8 +101,8 @@ export const homeSeo = (settings = {}) => ({
   schema: {
     '@context': 'https://schema.org',
     '@graph': [
-      { '@type': 'Organization', '@id': `${absoluteUrl('/')}#organization`, name: settings.business_name || siteName, url: absoluteUrl('/'), logo: absoluteUrl('/typearena-logo.svg'), telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254762220299' },
-      { '@type': 'ProfessionalService', '@id': `${absoluteUrl('/')}#business`, name: settings.business_name || siteName, url: absoluteUrl('/'), description: defaultDescription, areaServed: { '@type': 'Country', name: 'Kenya' }, telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254762220299', priceRange: 'KSh' },
+      { '@type': 'Organization', '@id': `${absoluteUrl('/')}#organization`, name: settings.business_name || siteName, url: absoluteUrl('/'), logo: absoluteUrl('/typearena-logo.svg'), telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254700384172' },
+      { '@type': 'ProfessionalService', '@id': `${absoluteUrl('/')}#business`, name: settings.business_name || siteName, url: absoluteUrl('/'), description: defaultDescription, areaServed: { '@type': 'Country', name: 'Kenya' }, telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254700384172', priceRange: 'KSh' },
       { '@type': 'WebSite', '@id': `${absoluteUrl('/')}#website`, name: settings.business_name || siteName, url: absoluteUrl('/') },
     ],
   },
