@@ -3,3 +3,40 @@
 1:07:16 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
 1:07:42 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
 1:08:50 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
+2:07:03 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
+2:07:03 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
+2:07:03 AM [vite] (client) [Unhandled error] NotFoundError: Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.
+ > removeChildFromContainer ../node_modules/react-dom/cjs/react-dom-client.development.js:23987:8
+ > runWithFiberInDEV ../node_modules/react-dom/cjs/react-dom-client.development.js:1045:29
+ > commitDeletionEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:15499:16
+ > recursivelyTraverseDeletionEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:15409:8
+ > commitDeletionEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:15573:10
+ > recursivelyTraverseMutationEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:15773:10
+ > commitMutationEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:16111:10
+ > flushMutationEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:19680:12
+ > commitRoot ../node_modules/react-dom/cjs/react-dom-client.development.js:19605:11
+ > completeRoot ../node_modules/react-dom/cjs/react-dom-client.development.js:19509:8
+
+2:07:03 AM [vite] (client) [console.warn] An error occurred in the <div> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+2:07:04 AM [vite] (client) [Unhandled error] NotFoundError: Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.
+ > removeChildFromContainer ../node_modules/react-dom/cjs/react-dom-client.development.js:23987:8
+ > runWithFiberInDEV ../node_modules/react-dom/cjs/react-dom-client.development.js:1045:29
+ > commitDeletionEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:15499:16
+ > recursivelyTraverseDeletionEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:15409:8
+ > commitDeletionEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:15573:10
+ > recursivelyTraverseMutationEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:15773:10
+ > commitMutationEffectsOnFiber ../node_modules/react-dom/cjs/react-dom-client.development.js:16111:10
+ > flushMutationEffects ../node_modules/react-dom/cjs/react-dom-client.development.js:19680:12
+ > commitRoot ../node_modules/react-dom/cjs/react-dom-client.development.js:19605:11
+ > completeRoot ../node_modules/react-dom/cjs/react-dom-client.development.js:19509:8
+
+2:07:04 AM [vite] (client) [console.warn] An error occurred in the <div> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+2:11:46 AM [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.

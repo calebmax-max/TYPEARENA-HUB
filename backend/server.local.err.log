@@ -3,9 +3,11 @@ WARNING: This is a development server. Do not use it in a production deployment.
  * Running on https://127.0.0.1:5000
  * Running on https://192.168.1.181:5000
 Press CTRL+C to quit
-127.0.0.1 - - [26/Nov/2026 01:08:50] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
-127.0.0.1 - - [26/Nov/2026 01:08:50] "GET /api/settings HTTP/1.1" 200 -
-127.0.0.1 - - [26/Nov/2026 01:08:51] "GET /api/settings HTTP/1.1" 200 -
-127.0.0.1 - - [26/Nov/2026 01:08:51] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
-127.0.0.1 - - [26/Nov/2026 01:09:16] "GET /api/orders/TH-305A7744/quotation?phone=254789898989 HTTP/1.1" 404 -
-127.0.0.1 - - [26/Nov/2026 01:09:16] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:09:48] "GET /api/settings HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:10:21] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:10:21] "GET /api/settings HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:10:34] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:10:38] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/settings HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -

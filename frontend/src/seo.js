@@ -1,4 +1,4 @@
-const siteName = 'TYPEARENA HUB'
+﻿const siteName = 'TYPEARENA HUB'
 const defaultDescription = 'TYPEARENA HUB provides reliable typing, document formatting, CV, online application, presentation, design and data support services in Kenya.'
 
 const servicePages = {
@@ -101,8 +101,8 @@ export const homeSeo = (settings = {}) => ({
   schema: {
     '@context': 'https://schema.org',
     '@graph': [
-      { '@type': 'Organization', '@id': `${absoluteUrl('/')}#organization`, name: settings.business_name || siteName, url: absoluteUrl('/'), logo: absoluteUrl('/typearena-logo.svg'), telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254700384172' },
-      { '@type': 'ProfessionalService', '@id': `${absoluteUrl('/')}#business`, name: settings.business_name || siteName, url: absoluteUrl('/'), description: defaultDescription, areaServed: { '@type': 'Country', name: 'Kenya' }, telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254700384172', priceRange: 'KSh' },
+      { '@type': 'Organization', '@id': `${absoluteUrl('/')}#organization`, name: settings.business_name || siteName, url: absoluteUrl('/'), logo: absoluteUrl('/typearena-logo.svg'), telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254183385502' },
+      { '@type': 'ProfessionalService', '@id': `${absoluteUrl('/')}#business`, name: settings.business_name || siteName, url: absoluteUrl('/'), description: defaultDescription, areaServed: { '@type': 'Country', name: 'Kenya' }, telephone: settings.whatsapp ? `+${String(settings.whatsapp).replace(/\D/g, '')}` : '+254183385502', priceRange: 'KSh' },
       { '@type': 'WebSite', '@id': `${absoluteUrl('/')}#website`, name: settings.business_name || siteName, url: absoluteUrl('/') },
     ],
   },
@@ -117,3 +117,4 @@ export const servicesSeo = {
 
 export { defaultDescription, servicePages }
 export { informationPages }
+

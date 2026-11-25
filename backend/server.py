@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, send_from_directory, jsonify, make_response, redirect, g, Response, stream_with_context
+﻿from flask import Flask, request, send_file, send_from_directory, jsonify, make_response, redirect, g, Response, stream_with_context
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -585,7 +585,7 @@ def init_order_db():
         defaults = {
             "business_name": "TYPEARENA HUB",
             "tagline": "Your Cyber. Online.",
-            "whatsapp": "254700384172",
+            "whatsapp": "254183385502",
             "email": "",
             "phone": "",
             "paybill": "",
@@ -617,7 +617,7 @@ def init_order_db():
             except Exception:
                 pass
         connection.execute("UPDATE orders SET delivery_method = 'Portal' WHERE delivery_method = 'Download'")
-        connection.execute("UPDATE business_settings SET value = '254700384172' WHERE `key` = 'whatsapp' AND value = '254762220299'")
+        connection.execute("UPDATE business_settings SET value = '254183385502' WHERE `key` = 'whatsapp' AND value IN ('254762220299', '254700384172')")
         connection.execute("UPDATE quotations SET payment_terms = 'Full payment after preview approval.' WHERE payment_terms = 'Full payment before work begins.'")
 
 init_order_db()
@@ -716,7 +716,7 @@ def send_order_push(reference, name, service):
             subscriptions = connection.execute("SELECT id, endpoint, p256dh, auth FROM push_subscriptions").fetchall()
         payload = json.dumps({
             "title": "New order received",
-            "body": f"{reference} · {service} · {name}",
+            "body": f"{reference} Â· {service} Â· {name}",
             "url": "/",
         })
         for subscription in subscriptions:
@@ -1473,3 +1473,4 @@ def api_enhance():
 if __name__ == "__main__":
     # HTTPS is required for phone camera access
     app.run(host="0.0.0.0", port=5000, ssl_context="adhoc")
+
