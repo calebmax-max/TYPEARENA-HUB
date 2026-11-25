@@ -1095,7 +1095,11 @@ def update_admin_order(reference):
             order = connection.execute("SELECT id FROM orders WHERE reference = ?", (reference,)).fetchone()
             if not order:
                 return jsonify({"error": "Order not found."}), 404
-            for table in ("order_files", "preview_files", "delivery_files", "quotations", "payments"):
+            delivery_file_ids = [row["id"] for row in connection.execute("SELECT id FROM delivery_files WHERE order_id = ?", (order["id"],)).fetchall()]
+            if delivery_file_ids:
+                placeholders = ",".join("?" for _ in delivery_file_ids)
+                connection.execute(f"DELETE FROM preview_files WHERE delivery_file_id IN ({placeholders})", tuple(delivery_file_ids))
+            for table in ("order_files", "delivery_files", "quotations", "payments"):
                 connection.execute(f"DELETE FROM {table} WHERE order_id = ?", (order["id"],))
             connection.execute("DELETE FROM orders WHERE id = ?", (order["id"],))
         for root in (os.path.join(ORDER_UPLOAD_DIR, reference), os.path.join(DELIVERY_UPLOAD_DIR, reference)):
