@@ -21,6 +21,7 @@ import re
 import subprocess
 import tempfile
 import shutil as file_shutil
+import json
 from html import unescape
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone, timedelta
@@ -53,6 +54,12 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+
+try:
+    from pywebpush import webpush, WebPushException
+except ImportError:
+    webpush = None
+    WebPushException = Exception
 
 def load_local_env():
     env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -115,6 +122,9 @@ OBJECT_STORAGE_CLIENT = boto3.client("s3", region_name=OBJECT_STORAGE_REGION, en
 CLAMAV_HOST = os.environ.get("TONIE_CLAMAV_HOST", "")
 CLAMAV_PORT = int(os.environ.get("TONIE_CLAMAV_PORT", "3310"))
 REQUIRE_MALWARE_SCAN = os.environ.get("TONIE_REQUIRE_MALWARE_SCAN", "1" if os.environ.get("TONIE_ENV") == "production" else "0") == "1"
+VAPID_PUBLIC_KEY = os.environ.get("TONIE_VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.environ.get("TONIE_VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.environ.get("TONIE_VAPID_SUBJECT", "mailto:admin@example.com").strip()
 
 if os.environ.get("TONIE_ENV") == "production":
     if ADMIN_PASSWORD == "change-me" and not os.environ.get("TONIE_ADMIN_PASSWORD_HASH"):
@@ -532,6 +542,14 @@ def init_order_db():
                 `key` VARCHAR(64) PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                endpoint TEXT NOT NULL,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT
+            );
         """)
         for index_sql in (
             "CREATE INDEX IF NOT EXISTS idx_orders_reference_phone ON orders(reference, phone)",
@@ -656,6 +674,45 @@ def require_admin():
         return jsonify({"error": "Administrator authentication required."}), 401
     return None
 
+def push_is_configured():
+    return bool(webpush and VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
+
+def send_order_push(reference, name, service):
+    """Send a best-effort push without making order creation depend on delivery."""
+    if not push_is_configured():
+        return
+    try:
+        with db_connection() as connection:
+            subscriptions = connection.execute("SELECT id, endpoint, p256dh, auth FROM push_subscriptions").fetchall()
+        payload = json.dumps({
+            "title": "New order received",
+            "body": f"{reference} · {service} · {name}",
+            "url": "/",
+        })
+        for subscription in subscriptions:
+            try:
+                webpush(
+                    subscription_info={
+                        "endpoint": subscription["endpoint"],
+                        "keys": {"p256dh": subscription["p256dh"], "auth": subscription["auth"]},
+                    },
+                    data=payload,
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims={"sub": VAPID_SUBJECT},
+                )
+                with db_connection() as connection:
+                    connection.execute("UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), subscription["id"]))
+            except WebPushException as error:
+                status = getattr(getattr(error, "response", None), "status_code", None)
+                app.logger.warning("Push delivery failed endpoint_id=%s status=%s", subscription["id"], status)
+                if status in {404, 410}:
+                    with db_connection() as connection:
+                        connection.execute("DELETE FROM push_subscriptions WHERE id = ?", (subscription["id"],))
+            except Exception:
+                app.logger.exception("Push delivery failed endpoint_id=%s", subscription["id"])
+    except Exception:
+        app.logger.exception("Could not load push subscriptions")
+
 def normalize_kenyan_phone(value):
     digits = "".join(character for character in str(value or "") if character.isdigit())
     if digits.startswith("254") and len(digits) == 12 and digits[3] in "701":
@@ -727,6 +784,42 @@ def admin_login():
     token = issue_admin_token()
     audit_event("admin_login_success", client=client_key)
     return jsonify({"token": token, "expiresIn": ADMIN_TOKEN_TTL, "message": "Signed in successfully."})
+
+@app.route("/api/admin/push-config", methods=["OPTIONS", "GET"])
+def admin_push_config():
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    denied = require_admin()
+    if denied:
+        return denied
+    return jsonify({"enabled": push_is_configured(), "publicKey": VAPID_PUBLIC_KEY if push_is_configured() else ""})
+
+@app.route("/api/admin/push-subscription", methods=["OPTIONS", "POST", "DELETE"])
+def admin_push_subscription():
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    denied = require_admin()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True) or {}
+    endpoint = str(payload.get("endpoint", "")).strip()
+    keys = payload.get("keys") or {}
+    p256dh = str(keys.get("p256dh", "")).strip()
+    auth = str(keys.get("auth", "")).strip()
+    if request.method == "DELETE":
+        if endpoint:
+            with db_connection() as connection:
+                connection.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        return jsonify({"ok": True})
+    if not endpoint.startswith("https://") or len(endpoint) > 2048 or not p256dh or not auth:
+        return jsonify({"error": "The push subscription is invalid."}), 400
+    with db_connection() as connection:
+        existing = connection.execute("SELECT id FROM push_subscriptions WHERE endpoint = ? LIMIT 1", (endpoint,)).fetchone()
+        if existing:
+            connection.execute("UPDATE push_subscriptions SET p256dh = ?, auth = ?, last_used_at = ? WHERE id = ?", (p256dh, auth, datetime.now(timezone.utc).isoformat(), existing["id"]))
+        else:
+            connection.execute("INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)", (endpoint, p256dh, auth, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
+    return jsonify({"ok": True}), 201
 
 @app.route("/api/admin/orders", methods=["OPTIONS", "GET"])
 def admin_orders():
@@ -1220,6 +1313,8 @@ def create_order():
     except Exception:
         app.logger.exception("Could not create order")
         return jsonify({"error": "The request could not be saved. Please try again."}), 500
+    if push_is_configured():
+        threading.Thread(target=send_order_push, args=(reference, values["name"], values["service"]), daemon=True).start()
     return jsonify({"reference": reference, "name": values["name"], "service": values["service"], "deadline": values["deadline"], "status": "New Request", "createdAt": created_at, "fileCount": len(checked_files)}), 201
 
 def enhancement_settings(data):

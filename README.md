@@ -39,3 +39,13 @@ gunicorn -c gunicorn.conf.py server:app
 ```
 
 Set the backend `TONIE_ALLOWED_ORIGIN` to the deployed frontend origin, for example `https://your-frontend.example.com`.
+
+### Phone push notifications
+
+Install the backend requirements and configure VAPID credentials. Generate one VAPID key pair and keep the private key only in the backend environment:
+
+```powershell
+vapid --gen
+```
+
+Set `TONIE_VAPID_PUBLIC_KEY`, `TONIE_VAPID_PRIVATE_KEY`, and `TONIE_VAPID_SUBJECT` (for example, `mailto:admin@your-domain.com`). The administrator must sign in from the phone, enable phone notifications, and allow notifications. The deployed frontend must use HTTPS; localhost is also suitable for local testing.

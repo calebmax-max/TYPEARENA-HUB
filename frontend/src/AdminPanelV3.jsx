@@ -18,6 +18,30 @@ export default function AdminPanel({ onClose, onSettings }) {
   const [token, setToken] = useState(sessionStorage.getItem('tonie-admin-token') || ''), [password, setPassword] = useState(''), [orders, setOrders] = useState([]), [error, setError] = useState(''), [query, setQuery] = useState(''), [statusFilter, setStatusFilter] = useState('All statuses'), [quoteFor, setQuoteFor] = useState(null), [expanded, setExpanded] = useState(null), [loginBusy, setLoginBusy] = useState(false), [loading, setLoading] = useState(false), [statusBusy, setStatusBusy] = useState(''), [deleteBusy, setDeleteBusy] = useState('')
   useEffect(() => { const closeOnEscape = (event) => event.key === 'Escape' && onClose(); document.addEventListener('keydown', closeOnEscape); return () => document.removeEventListener('keydown', closeOnEscape) }, [onClose])
   useEffect(() => { if (!token) return undefined; let timer; const resetIdleTimer = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { sessionStorage.removeItem('tonie-admin-token'); setToken(''); setOrders([]); setError('Your administrator session ended after inactivity.') }, 15 * 60 * 1000) }; const events = ['pointerdown', 'keydown', 'mousemove']; events.forEach((event) => window.addEventListener(event, resetIdleTimer)); resetIdleTimer(); return () => { window.clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, resetIdleTimer)) } }, [token])
+  useEffect(() => {
+    if (!token || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return undefined
+    let cancelled = false
+    const setup = async () => {
+      try {
+        const configResponse = await fetch('/api/admin/push-config', { headers: { Authorization: `Bearer ${token}` } })
+        const config = await configResponse.json()
+        if (cancelled || !configResponse.ok || !config.enabled) return
+        const registration = await navigator.serviceWorker.register('/sw.js')
+        const subscription = await registration.pushManager.getSubscription()
+        const host = document.querySelector('.dashboard-stats')?.parentElement
+        if (!host || host.querySelector('.admin-push-box')) return
+        const box = document.createElement('div'); box.className = 'admin-push-box'
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'small-admin-button'; button.textContent = subscription ? 'Phone notifications enabled' : 'Enable phone notifications'; button.disabled = Boolean(subscription)
+        button.onclick = async () => { try { if (await Notification.requestPermission() !== 'granted') throw new Error('Notification permission was not granted on this phone.')
+          const key = config.publicKey; const padding = '='.repeat((4 - (key.length % 4)) % 4); const raw = atob((key + padding).replace(/-/g, '+').replace(/_/g, '/')); const applicationServerKey = Uint8Array.from([...raw].map((character) => character.charCodeAt(0)))
+          const current = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey }); const response = await fetch('/api/admin/push-subscription', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(current.toJSON()) }); if (!response.ok) throw new Error('Could not save this phone for notifications.'); button.textContent = 'Phone notifications enabled'; button.disabled = true
+        } catch (error) { button.textContent = error.message } }
+        box.appendChild(button); host.insertBefore(box, host.querySelector('.admin-filters'))
+      } catch { /* push setup is optional and must not block the order desk */ }
+    }
+    setup()
+    return () => { cancelled = true; document.querySelector('.admin-push-box')?.remove() }
+  }, [token])
   const load = async (auth = token) => { setLoading(true); try { const response = await fetch('/api/admin/orders', { headers: { Authorization: `Bearer ${auth}` } }); if (response.status === 401) { sessionStorage.removeItem('tonie-admin-token'); setToken(''); setOrders([]); throw new Error('Your admin session expired. Please sign in again.') } const data = await readJsonResponse(response); if (!response.ok) throw new Error(data.error || `Could not load orders (${response.status}).`); setOrders(data) } finally { setLoading(false) } }
   useEffect(() => { if (!token) return undefined; load().catch((cause) => setError(cause.message)); const interval = window.setInterval(() => { if (!document.hidden) load().catch(() => {}) }, 30000); return () => window.clearInterval(interval) }, [token])
   const visibleOrders = useMemo(() => { const needle = query.trim().toLowerCase(); return orders.filter((order) => { const matchesQuery = !needle || [order.reference, order.name, order.phone, order.service, order.email].some((value) => String(value || '').toLowerCase().includes(needle)); return matchesQuery && (statusFilter === 'All statuses' || order.status === statusFilter) }).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))) }, [orders, query, statusFilter])
