@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import './responsive.css'
@@ -23,7 +23,7 @@ window.fetch = (input, init) => browserFetch(typeof input === 'string' && input.
 const Arrow = () => <span aria-hidden="true">↗</span>
 const WhatsAppIcon = () => <svg className="whatsapp-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.52 3.48A11.82 11.82 0 0 0 12.08 0C5.53 0 .2 5.33.2 11.88c0 2.09.55 4.13 1.6 5.93L.1 24l6.33-1.66a11.86 11.86 0 0 0 5.65 1.43h.01c6.55 0 11.88-5.33 11.88-11.88 0-3.18-1.24-6.16-3.45-8.41ZM12.09 21.72h-.01a9.83 9.83 0 0 1-5.01-1.37l-.36-.21-3.76.99 1-3.66-.23-.38a9.82 9.82 0 0 1-1.5-5.21C2.22 6.46 6.65 2.03 12.09 2.03c2.64 0 5.12 1.03 6.98 2.9a9.8 9.8 0 0 1 2.89 6.97c0 5.44-4.43 9.87-9.87 9.87Zm5.41-7.4c-.3-.15-1.78-.88-2.05-.98-.27-.1-.47-.15-.67.15-.2.3-.77.98-.94 1.18-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.47-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.14.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.49s1.07 2.89 1.22 3.09c.15.2 2.1 3.21 5.09 4.5.71.31 1.27.49 1.7.63.72.23 1.38.2 1.9.12.58-.09 1.78-.73 2.03-1.43.25-.7.25-1.3.17-1.43-.07-.13-.27-.2-.56-.35Z" /></svg>
 const normalizePhone = (value) => { const digits = String(value || '').replace(/\D/g, ''); return digits.startsWith('0') ? `254${digits.slice(1)}` : digits }
-const uploadOrder = (form) => new Promise((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', `${API_BASE}/api/orders`); xhr.upload.onprogress = (event) => { if (event.lengthComputable) window.dispatchEvent(new CustomEvent('order-upload-progress', { detail: Math.round((event.loaded / event.total) * 100) })) }; xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, json: async () => JSON.parse(xhr.responseText || '{}') }); xhr.onerror = () => reject(new Error('The request could not be saved. Please check your connection and try again.')); xhr.send(form) })
+const uploadOrder = (form, idempotencyKey) => new Promise((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', `${API_BASE}/api/orders`); xhr.setRequestHeader('X-Idempotency-Key', idempotencyKey); xhr.upload.onprogress = (event) => { if (event.lengthComputable) window.dispatchEvent(new CustomEvent('order-upload-progress', { detail: Math.round((event.loaded / event.total) * 100) })) }; xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, json: async () => JSON.parse(xhr.responseText || '{}') }); xhr.onerror = () => reject(new Error('The request could not be saved. Please check your connection and try again.')); xhr.send(form) })
 const services = [
   ['01', 'Document services', 'Typing, formatting, editing and file conversion - clean and ready to send.', '▤'],
   ['02', 'Applications and forms', 'Online applications, registrations and submissions handled with care.', '⌁'],
@@ -42,6 +42,7 @@ function App() {
   const [selectedService, setSelectedService] = useState('')
   const [submittedOrder, setSubmittedOrder] = useState(null)
   const [submittingOrder, setSubmittingOrder] = useState(false)
+  const submissionKeyRef = useRef('')
   const [copiedReference, setCopiedReference] = useState(false)
   const [contactSettings, setContactSettings] = useState({ email: '', operating_hours: 'Online every day', whatsapp: '254762220299' })
   const [offline, setOffline] = useState(!navigator.onLine)
@@ -67,14 +68,15 @@ function App() {
     setSeo(page ? { title: page.title, description: page.description, path: `/services/${serviceSlug}`, schema: { '@context': 'https://schema.org', '@type': 'Service', name: page.name, description: page.description, provider: { '@type': 'Organization', name: 'TYPEARENA HUB', url: `${window.location.origin}/` }, areaServed: { '@type': 'Country', name: 'Kenya' } } } : info ? { ...info, path: `/${informationSlug}`, schema } : path === 'services' ? servicesSeo : homeSeo(contactSettings))
   }, [contactSettings, serviceSlug, informationSlug])
   const scrollTo = (id) => { setMenuOpen(false); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }) }
-  const openOrder = (service = '') => { setSelectedService(service); setSubmittedOrder(null); setOrderOpen(true) }
+  const openOrder = (service = '') => { submissionKeyRef.current = ''; setSelectedService(service); setSubmittedOrder(null); setOrderOpen(true) }
   useEffect(() => { const trust = document.querySelector('.trust-section > div:first-child'); if (!trust) return undefined; trust.querySelectorAll('.testimonial-note').forEach((note) => note.remove()); let entries = []; try { entries = String(contactSettings.testimonials || '').split('\n').map((line) => line.split('|').map((part) => part.trim())).filter((parts) => parts[0] && parts[1]) } catch { entries = [] } if (!entries.length) return undefined; entries.slice(0, 3).forEach(([quote, name, role]) => { const note = document.createElement('div'); note.className = 'testimonial-note'; note.innerHTML = `<span>“${quote.replace(/[<>]/g, '')}”</span><strong>${name.replace(/[<>]/g, '')}${role ? ` · ${role.replace(/[<>]/g, '')}` : ''}</strong>`; trust.appendChild(note) }); return () => trust.querySelectorAll('.testimonial-note').forEach((note) => note.remove()) }, [contactSettings.testimonials])
   useEffect(() => { const details = { 'Document services': ['Typing & formatting', 'CVs and resumes', 'Letters', 'PDF editing', 'Document conversion'], 'Applications and forms': ['Online applications', 'Registration forms', 'Application assistance', 'Form filling', 'Online account assistance'], 'Creative digital work': ['PowerPoint presentations', 'Posters and flyers', 'Graphic design', 'Social media designs', 'CV design'], 'Data and admin support': ['Data entry', 'Excel spreadsheets', 'Research formatting', 'Reports', 'Basic data analysis'] }; const cards = Array.from(document.querySelectorAll('.service-card')); cards.forEach((card) => { if (card.querySelector('.service-details')) return; const title = card.querySelector('h3')?.textContent; const items = details[title] || []; if (!items.length) return; const disclosure = document.createElement('details'); disclosure.className = 'service-details'; const summary = document.createElement('summary'); summary.textContent = 'See included services'; disclosure.appendChild(summary); const list = document.createElement('ul'); items.forEach((item) => { const entry = document.createElement('li'); entry.textContent = item; list.appendChild(entry) }); disclosure.appendChild(list); card.insertBefore(disclosure, card.querySelector('button')); }); return () => cards.forEach((card) => card.querySelector('.service-details')?.remove()) }, [])
   useEffect(() => { const link = document.querySelector('.nav button'); if (!link) return undefined; const openServices = () => { window.location.href = '/services' }; link.addEventListener('click', openServices); return () => link.removeEventListener('click', openServices) }, [])
   useEffect(() => { const heroButton = document.querySelector('.hero-actions .button.orange'); if (heroButton) heroButton.childNodes[0].textContent = 'Request a service '; const orderButton = document.querySelector('.order-card:not(.confirmation) .button.dark'); if (orderButton) orderButton.childNodes[0].textContent = 'Request a service '; const contactButton = document.querySelector('.contact-card .button.orange'); if (contactButton) contactButton.childNodes[0].textContent = 'Request a service '; const processText = document.querySelector('.step p'); if (processText) processText.textContent = 'Click Request a service, choose a category, explain what you need, add your deadline, and attach your files.' }, [])
   const submitOrder = async (event) => {
     event.preventDefault()
-    if (submittingOrder) return
+    if (submittingOrder || submissionKeyRef.current) return
+    submissionKeyRef.current = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
     setSubmittingOrder(true)
     setSubmitError('')
     const form = new FormData(event.currentTarget)
@@ -82,7 +84,7 @@ function App() {
     if (specificService) form.set('service', specificService)
     if (specificService) form.set('instructions', `Specific service: ${specificService}\n\n${form.get('instructions')}`)
     try {
-      const response = await uploadOrder(form)
+      const response = await uploadOrder(form, submissionKeyRef.current)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'The request could not be saved. Please try again.')
       form.set('phone', normalizePhone(form.get('phone')))
@@ -90,6 +92,7 @@ function App() {
       localStorage.setItem('typearena-active-order', JSON.stringify(activeOrder))
       localStorage.removeItem('typearena-request-draft')
       setSubmittedOrder(activeOrder); setOrderOpen(false)
+      submissionKeyRef.current = ''
       window.setTimeout(() => { const confirmation = document.getElementById('order'); confirmation?.scrollIntoView({ behavior: 'smooth', block: 'start' }); confirmation?.focus({ preventScroll: true }) }, 80)
     } catch (cause) {
       setSubmitError(cause.message)

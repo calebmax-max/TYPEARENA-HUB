@@ -550,6 +550,11 @@ def init_order_db():
                 created_at TEXT NOT NULL,
                 last_used_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS order_submission_keys (
+                idempotency_key VARCHAR(128) PRIMARY KEY,
+                reference VARCHAR(64) NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """)
         for index_sql in (
             "CREATE INDEX IF NOT EXISTS idx_orders_reference_phone ON orders(reference, phone)",
@@ -1262,6 +1267,9 @@ def create_order():
         return jsonify({"error": "Choose a valid delivery method."}), 400
 
     files = request.files.getlist("files")
+    idempotency_key = request.headers.get("X-Idempotency-Key", "").strip()
+    if idempotency_key and (len(idempotency_key) > 128 or not re.fullmatch(r"[A-Za-z0-9_-]+", idempotency_key)):
+        return jsonify({"error": "The request could not be submitted. Please try again."}), 400
     if len(files) > MAX_ORDER_FILES:
         return jsonify({"error": f"Attach no more than {MAX_ORDER_FILES} files at once."}), 413
     checked_files = []
@@ -1296,10 +1304,18 @@ def create_order():
     created_at = datetime.now(timezone.utc).isoformat()
     try:
         with db_connection() as connection:
+            if idempotency_key:
+                existing_key = connection.execute("SELECT reference FROM order_submission_keys WHERE idempotency_key = ? LIMIT 1", (idempotency_key,)).fetchone()
+                if existing_key:
+                    existing_order = connection.execute("SELECT reference, name, service, deadline, status, created_at FROM orders WHERE reference = ?", (existing_key["reference"],)).fetchone()
+                    if existing_order:
+                        return jsonify({"reference": existing_order["reference"], "name": existing_order["name"], "service": existing_order["service"], "deadline": existing_order["deadline"], "status": existing_order["status"], "createdAt": existing_order["created_at"], "fileCount": 0, "duplicate": True}), 200
             cursor = connection.execute(
                 "INSERT INTO orders (reference, name, phone, email, service, instructions, deadline, delivery_method, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (reference, values["name"], values["phone"], request.form.get("email", "").strip(), values["service"], values["instructions"], values["deadline"], delivery_method, created_at),
             )
+            if idempotency_key:
+                connection.execute("INSERT INTO order_submission_keys (idempotency_key, reference, created_at) VALUES (?, ?, ?)", (idempotency_key, reference, created_at))
             order_id = cursor.lastrowid
             order_dir = os.path.join(ORDER_UPLOAD_DIR, reference)
             os.makedirs(order_dir, exist_ok=True)
