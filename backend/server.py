@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, send_from_directory, jsonify, make_response, redirect, g
+from flask import Flask, request, send_file, send_from_directory, jsonify, make_response, redirect, g, Response, stream_with_context
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -205,8 +205,23 @@ def remove_storage_prefix(reference):
 
 def download_response(kind, reference, stored_name, original_name, content_type=None):
     if OBJECT_STORAGE_ENABLED:
-        url = OBJECT_STORAGE_CLIENT.generate_presigned_url("get_object", Params={"Bucket": OBJECT_STORAGE_BUCKET, "Key": storage_key(kind, reference, stored_name), "ResponseContentDisposition": f'attachment; filename="{original_name}"'}, ExpiresIn=300)
-        return redirect(url)
+        object_response = OBJECT_STORAGE_CLIENT.get_object(Bucket=OBJECT_STORAGE_BUCKET, Key=storage_key(kind, reference, stored_name))
+        body = object_response["Body"]
+        safe_name = secure_filename(original_name) or "download"
+        def stream_object():
+            try:
+                while True:
+                    chunk = body.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                body.close()
+        response = Response(stream_with_context(stream_object()), mimetype=content_type or object_response.get("ContentType") or "application/octet-stream")
+        response.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+        if object_response.get("ContentLength") is not None:
+            response.headers["Content-Length"] = str(object_response["ContentLength"])
+        return response
     local_kind = "order-files" if kind == "orders" else "delivery-files"
     root = os.path.abspath(os.path.join(DATA_DIR, local_kind, reference))
     path = os.path.abspath(os.path.join(root, stored_name))
