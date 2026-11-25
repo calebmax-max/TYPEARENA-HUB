@@ -1,0 +1,3 @@
+.request-form label:has(select[name="specific_service"]) {
+  display: none;
+}

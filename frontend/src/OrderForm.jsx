@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
+import './order-form-overrides.css'
 
 const Arrow = () => <span aria-hidden="true">↗</span>
-const serviceOptions = {
+const serviceGroups = {
   'Document services': ['Typing & formatting', 'CV creation', 'Cover letter', 'PDF editing', 'Document conversion'],
   'Applications and forms': ['Online applications', 'Registration forms', 'Application assistance', 'Form filling', 'Online account assistance'],
   'Creative digital work': ['PowerPoint presentations', 'Posters', 'Flyers', 'Graphic design', 'Social media designs', 'CV design/redesign'],
@@ -13,16 +14,18 @@ const serviceOptions = {
   'Online assistance': ['Online research', 'Account guidance', 'Digital task support'],
   'Custom request': ['Something else']
 }
+const serviceOptions = Object.fromEntries([...new Set(Object.values(serviceGroups).flat())].map((service) => [service, []]))
+const serviceChoices = Object.keys(serviceOptions)
 const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip']
 const maxFileBytes = 20 * 1024 * 1024
 const today = () => { const date = new Date(); const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10) }
 
 export default function OrderForm({ selectedService, busy, onClose, onSubmit, onPrivacy = () => window.dispatchEvent(new CustomEvent('open-privacy')) }) {
-  const [service, setService] = useState(selectedService || '')
+  const [service, setService] = useState(serviceChoices.includes(selectedService) ? selectedService : '')
   const [selectedFiles, setSelectedFiles] = useState([])
   const [fileError, setFileError] = useState('')
   const inputRef = useRef(null); const closeRef = useRef(null)
-  useEffect(() => { setService(selectedService || '') }, [selectedService])
+  useEffect(() => { setService(serviceChoices.includes(selectedService) ? selectedService : '') }, [selectedService])
   useEffect(() => { const phone = document.querySelector('.request-form input[name="phone"]'); const phoneLabel = phone?.closest('label'); if (phone) phone.placeholder = 'WhatsApp number e.g. 0712 345 678'; if (phoneLabel?.querySelector('span')) phoneLabel.querySelector('span').textContent = '(WhatsApp number)' }, [])
   useEffect(() => { const form = document.querySelector('.request-form'); if (!form) return undefined; const draftKey = 'typearena-request-draft'; try { const draft = JSON.parse(localStorage.getItem(draftKey) || '{}'); ['name', 'phone', 'email', 'deadline', 'instructions'].forEach((name) => { if (draft[name] && form.elements[name]) form.elements[name].value = draft[name] }) } catch { /* ignore an unavailable or malformed draft */ } const saveDraft = () => { const data = {}; ['name', 'phone', 'email', 'deadline', 'instructions'].forEach((name) => { if (form.elements[name]) data[name] = form.elements[name].value }) ; localStorage.setItem(draftKey, JSON.stringify(data)) }; form.addEventListener('input', saveDraft); return () => form.removeEventListener('input', saveDraft) }, [])
   useEffect(() => { const select = document.querySelector('select[name="delivery_method"]'); if (select) { const legacy = Array.from(select.options).find((option) => option.value === 'Download'); if (legacy) { legacy.value = 'Portal'; legacy.textContent = 'Customer portal (main)' } Array.from(select.options).find((option) => option.value === 'Email')?.remove(); select.value = 'Portal' } }, [])
