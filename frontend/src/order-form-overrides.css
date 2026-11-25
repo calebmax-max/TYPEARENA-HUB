@@ -1,3 +1,11 @@
-.request-form label:has(select[name="specific_service"]) {
+.request-form label.category-selector-hidden {
+  display: none !important;
+}
+
+.request-form.request-step-one label.subservice-selector {
+  display: flex !important;
+}
+
+.request-form label.subservice-selector span {
   display: none;
 }

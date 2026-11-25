@@ -49,6 +49,7 @@ function App() {
   const serviceSlug = path.startsWith('services/') ? path.slice('services/'.length) : ''
   const informationSlug = ['how-it-works', 'about', 'faq'].includes(path) ? path : ''
   useEffect(() => { const openPrivacy = () => setLegalOpen('privacy'); window.addEventListener('open-privacy', openPrivacy); return () => window.removeEventListener('open-privacy', openPrivacy) }, [])
+  useEffect(() => { const pendingService = sessionStorage.getItem('typearena-request-service'); if (!pendingService) return; sessionStorage.removeItem('typearena-request-service'); setSelectedService(pendingService); setOrderOpen(true) }, [])
   useEffect(() => { const online = () => setOffline(false); const offlineEvent = () => setOffline(true); window.addEventListener('online', online); window.addEventListener('offline', offlineEvent); return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offlineEvent) } }, [])
   useEffect(() => {
     fetch('/api/settings').then((response) => response.ok ? response.json() : null).then((data) => data && setContactSettings((current) => ({ ...current, ...data }))).catch(() => {})
@@ -78,6 +79,7 @@ function App() {
     setSubmitError('')
     const form = new FormData(event.currentTarget)
     const specificService = form.get('specific_service')
+    if (specificService) form.set('service', specificService)
     if (specificService) form.set('instructions', `Specific service: ${specificService}\n\n${form.get('instructions')}`)
     try {
       const response = await uploadOrder(form)
@@ -110,7 +112,7 @@ function App() {
   useEffect(() => { const labels = { 'CVs and resumes': 'CV creation', Letters: 'Cover letter', 'Posters and flyers': 'Posters and flyers' }; document.querySelectorAll('.service-details li').forEach((item) => { const next = labels[item.textContent.trim()]; if (next) item.textContent = next }) }, [])
   useEffect(() => { const prices = parsePricing(contactSettings.pricing); document.querySelectorAll('.service-details li').forEach((item) => { const raw = prices[item.textContent.trim()]; if (raw) item.setAttribute('data-price', raw.startsWith('From ') ? raw : `From ${raw}`) }) }, [contactSettings.pricing])
   if (offline) return <ErrorPage offline />
-  if (path === 'services') return <ServicesPage onOrder={() => { window.location.href = '/#order' }} />
+  if (path === 'services') return <ServicesPage onOrder={(event) => { const summary = event?.currentTarget?.closest('.services-directory details')?.querySelector('summary'); const service = summary?.textContent?.replace(/^\s*\d+\s*/, '').trim(); if (service) sessionStorage.setItem('typearena-request-service', service); window.location.href = '/#order' }} />
   if (serviceSlug) { const service = getServiceBySlug(serviceSlug); if (service) return <ServiceDetailPage service={service} onOrder={() => { window.location.href = '/#order' }} />; return <ErrorPage /> }
   if (informationSlug) return <InformationPage page={informationPages[informationSlug]} onOrder={() => { window.location.href = '/#order' }} />
   if (path !== '') return <ErrorPage />
