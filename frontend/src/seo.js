@@ -1,5 +1,5 @@
 const siteName = 'TYPEARENA HUB'
-const defaultDescription = 'Online typing, document formatting, CV, application, presentation and data support services for customers in Kenya.'
+const defaultDescription = 'TYPEARENA HUB provides reliable typing, document formatting, CV, online application, presentation, design and data support services in Kenya.'
 
 const servicePages = {
   'typing-formatting': {

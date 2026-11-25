@@ -3,5 +3,4 @@ Allow: /
 Disallow: /api/
 Disallow: /admin
 
-# Replace the domain with the deployed site domain before launch.
-Sitemap: https://YOUR-PRODUCTION-DOMAIN.example/sitemap.xml
+Sitemap: https://www.typearena.co.ke/sitemap.xml

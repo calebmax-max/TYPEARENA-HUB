@@ -551,6 +551,7 @@ def init_order_db():
             "phone": "",
             "paybill": "",
             "till_number": "",
+            "till_account_name": "Caleb Mulwa Tonny",
             "payment_instructions": "",
             "pricing": "Typing | KSh 15/page\nDocument formatting | KSh 15/page\nCV creation | KSh 250\nCover letter | KSh 100\nPDF editing | KSh 30\nDocument conversion | KSh 30/document\nOnline applications | KSh 100/application\nRegistration forms | KSh 30/form\nApplication assistance | KSh 100\nForm filling | KSh 30/form\nOnline account assistance | KSh 100\nPowerPoint presentations | KSh 300/presentation\nPosters | KSh 200/design\nFlyers | KSh 200/design\nGraphic design | KSh 200/design\nSocial media designs | KSh 150/design\nCV design/redesign | KSh 200\nData entry | KSh 150/task\nExcel spreadsheets | KSh 150/task\nResearch formatting | KSh 150\nReport formatting | KSh 150\nBasic data analysis | KSh 300/task",
             "operating_hours": "Online every day",
@@ -664,7 +665,7 @@ def normalize_kenyan_phone(value):
     raise ValueError("Enter a valid Kenyan phone number, for example 0712 345 678 or +254 712 345 678.")
 
 PUBLIC_SETTING_KEYS = {"business_name", "tagline", "whatsapp", "email", "phone", "operating_hours", "testimonials", "pricing"}
-EDITABLE_SETTING_KEYS = PUBLIC_SETTING_KEYS | {"paybill", "till_number", "payment_instructions"}
+EDITABLE_SETTING_KEYS = PUBLIC_SETTING_KEYS | {"paybill", "till_number", "till_account_name", "payment_instructions"}
 
 @app.route("/api/settings", methods=["GET"])
 def public_settings():
@@ -829,10 +830,11 @@ def get_customer_quotation(reference):
     result = dict(quote)
     result["paymentStatus"] = result.pop("payment_status", None)
     with db_connection() as connection:
-        setting_rows = connection.execute("SELECT `key`, value FROM business_settings WHERE `key` IN (?, ?, ?)", ("paybill", "till_number", "payment_instructions")).fetchall()
+        setting_rows = connection.execute("SELECT `key`, value FROM business_settings WHERE `key` IN (?, ?, ?, ?)", ("paybill", "till_number", "till_account_name", "payment_instructions")).fetchall()
     settings = {row["key"]: row["value"] for row in setting_rows}
     result["paybill"] = settings.get("paybill", "")
     result["tillNumber"] = settings.get("till_number", "")
+    result["tillAccountName"] = settings.get("till_account_name", "Caleb Mulwa Tonny")
     result["paymentInstructions"] = settings.get("payment_instructions", "")
     return jsonify(result)
 

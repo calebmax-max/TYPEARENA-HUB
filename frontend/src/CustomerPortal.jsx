@@ -24,6 +24,8 @@ export default function CustomerPortal({ onClose }) {
   const [busy, setBusy] = useState(false)
   useEffect(() => { const closeOnEscape = (event) => event.key === 'Escape' && onClose(); const previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; document.addEventListener('keydown', closeOnEscape); return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', closeOnEscape) } }, [onClose])
 
+  useEffect(() => { const till = Array.from(document.querySelectorAll('.payment-details span')).find((element) => element.textContent.includes('Till number:')); if (!till || till.nextElementSibling?.classList.contains('till-account-name')) return; const name = document.createElement('span'); name.className = 'till-account-name'; name.innerHTML = `Account name: <strong>${quote?.tillAccountName || 'Caleb Mulwa Tonny'}</strong>`; till.after(name) }, [quote])
+
   const lookup = async (event) => {
     event.preventDefault()
     if (busy) return
