@@ -11,3 +11,7 @@ Press CTRL+C to quit
 127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
 127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/settings HTTP/1.1" 200 -
 127.0.0.1 - - [26/Nov/2026 02:11:47] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 10:30:14] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 10:30:14] "GET /api/settings HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 10:37:11] "GET /api/settings HTTP/1.1" 200 -
+127.0.0.1 - - [26/Nov/2026 10:37:11] "GET /api/orders/TH-305A7744/tracking?phone=254789898989 HTTP/1.1" 200 -

@@ -88,6 +88,7 @@ ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ORDER_FILE_BYTES = 20 * 1024 * 1024
 ORDER_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "zip"}
 BASE_DIR = os.path.dirname(__file__)
+FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "dist")
 configured_data_dir = os.environ.get("TONIE_UPLOAD_DIR", "./data")
 DATA_DIR = configured_data_dir if os.path.isabs(configured_data_dir) else os.path.abspath(os.path.join(BASE_DIR, configured_data_dir))
 ORDER_UPLOAD_DIR = os.path.join(DATA_DIR, "order-files")
@@ -1423,12 +1424,19 @@ def align(base, img):
 
 @app.route("/")
 def index():
-    built_index = os.path.join("dist", "index.html")
-    return send_file(built_index if os.path.exists(built_index) else "index.html")
+    built_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    fallback_index = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(built_index):
+        return send_file(built_index)
+    if os.path.exists(fallback_index):
+        return send_file(fallback_index)
+    # The frontend is normally deployed separately. Keep the API service's
+    # root endpoint healthy when no local frontend bundle is present.
+    return jsonify({"ok": True, "service": "typearena-hub", "frontend": "deployed-separately"})
 
 @app.route("/assets/<path:filename>")
 def assets(filename):
-    response = send_from_directory(os.path.join("dist", "assets"), filename)
+    response = send_from_directory(os.path.join(FRONTEND_DIST_DIR, "assets"), filename)
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
 
